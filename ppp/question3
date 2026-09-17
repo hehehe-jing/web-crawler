@@ -1,0 +1,109 @@
+import os
+import time
+import pandas as pd
+import numpy as np
+import tushare as ts
+import akshare as ak
+import requests
+start = time.perf_counter()
+
+# 以脚本自身所在目录为基准定位数据文件，避免受“当前工作目录”影响
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CSV_PATH = os.path.join(BASE_DIR, 'c31cbd87d1784beb8589f9c4ee4ff7a4.csv')
+
+# 缺失值处理，如果有close则直接返回，否则查询前两个月的数据最后一天的close并填充
+def is_close(row, pro):
+    if not pd.isna(row['close']):
+        return row['close']     
+
+    end_date = '20251212'
+    start_date = '20251101'
+    hist = pro.daily(ts_code=row['code'], start_date=start_date, end_date=end_date)
+
+    if hist.empty:
+        print(f"{row['code']} 在该区间内无数据")
+        return None
+
+    return hist.sort_values('trade_date', ascending=False).iloc[0]['close']
+
+# 为code添加后缀
+def add_suffix(code):
+    code = str(code).zfill(6)
+    if code.startswith(('600', '601', '603', '605', '688', '689', '900')):
+        return code + '.SH'
+    elif code.startswith(('000', '001', '002', '003', '300', '301', '200')):
+        return code + '.SZ'
+    elif code.startswith(('8', '4')):
+        return code + '.BJ'
+    else:
+        return code
+
+df = pd.read_csv(CSV_PATH)
+
+# 按 code 看有没有重复，缺失值
+print("同一只股票只数:" + str(df['code'].duplicated().sum()))
+print("各自有无缺失值:" + "\n" + str(df.isna().sum()))
+
+
+# 将code其中的数据补齐至六位与股票代码对应
+df['code'] = df['code'].astype(str).str.strip().str.zfill(6)
+# 为其添加不同交易所对应的后缀，直接用于之后的缺失值查询
+df['code'] = df['code'].apply(add_suffix)
+
+# 拉取20251212当日的所有股票的明细
+ts.set_token('4ea92729194a9a3a60f9c75dd60eb9a854622f774030aed003a3e329') 
+pro = ts.pro_api()
+df1 = pro.daily(trade_date='20251212')
+# 获取沪深300指数在2025-12-12的涨跌幅
+rows = requests.get('https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=sh000300,day,2025-12-01,2025-12-12,30,').json()['data']['sh000300']['day']
+prev, cur = float(rows[-2][2]), float(rows[-1][2])
+pct_chg = (cur - prev) / prev* 100
+
+# 只取code和close列
+df2 = df1[['ts_code','close','pre_close','change']].copy()
+df2 = df2.rename(columns={'ts_code': 'code'})  # pyright: ignore[reportCallIssue]
+
+# 拼接两个表中的code，hold_vol以及close列
+merged = df.merge(df2, on='code', how='left')
+
+# 处理缺失值
+missing = merged[merged['close'].isna()]
+print("含有close缺失值的股票代码\n"+ str(missing))
+merged['close'] = merged.apply(is_close, axis=1, args=(pro,))
+
+
+# pre_close 用 close 填（停牌当天收益为 0）
+merged['pre_close'] = merged['pre_close'].fillna(merged['close'])
+
+# change 也补 0（或者用 close - pre_close）
+merged['change'] = merged['change'].fillna(0)
+
+# 计算结果及耗时\
+
+
+
+merged['market_value'] = merged.hold_vol * merged.close
+merged['market_value1'] = merged.hold_vol * merged.pre_close
+merged['market_value2'] = merged.hold_vol * merged.change
+m = merged['market_value'].sum()
+m1 = merged['market_value1'].sum()
+m2 = merged['market_value'].sum() - merged['market_value1'].sum()
+m3 = merged['market_value2'].sum()
+m4 = (m2/m1)*100
+m5 = m4-pct_chg
+m6 = m-m1
+print(f"\n今日总市值: {m:.2f} 元")
+print(f"昨日总市值: {m1:.2f} 元\n")
+print(f"按照（今日总市值-昨日总市值计算的）   今日收益额: {m6:.2f} 元")
+print(f"按照（（close-pre_close）*hold_vol）.sum()计算的  今日收益额为: {m2:.2f} 元")
+print(f"按照（change*hold_vol）.sum()计算的  今日收益额: {m3:.2f} 元\n")
+print(f"今日收益率为: {m4:.4f} %")
+print(f"沪深300指数在 2025-12-12 的涨跌幅为: {pct_chg:.4f}%")
+print(f"今日超额收益率为: {m5:.4f} %")
+print(f"耗时: {time.perf_counter() - start:.2f} 秒")
+
+
+
+
+
+
