@@ -1,0 +1,92 @@
+import os
+import time
+import pandas as pd
+import numpy as np
+import tushare as ts
+start = time.perf_counter()
+# -*- coding: utf-8 -*-
+URL = ("https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/"
+       "file/autofile/cons/{code}cons.xls")          # 换 code 即换指数
+
+# 以脚本自身所在目录为基准定位数据文件，避免受“当前工作目录”影响
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CSV_PATH = os.path.join(BASE_DIR, 'c31cbd87d1784beb8589f9c4ee4ff7a4.csv')
+()
+# 缺失值处理，如果有close则直接返回，否则查询前两个月的数据最后一天的close并填充
+def is_close(row, pro):
+    if not pd.isna(row['close']):
+        return row['close']     
+
+    end_date = '20251212'
+    start_date = '20251101'
+    hist = pro.daily(ts_code=row['code'], start_date=start_date, end_date=end_date)
+
+    if hist.empty:
+        print(f"{row['code']} 在该区间内无数据")
+        return None
+
+    return hist.sort_values('trade_date', ascending=False).iloc[0]['close']
+
+
+# 为code添加后缀
+def add_suffix(code):
+    code = str(code).zfill(6)
+    if code.startswith(('600', '601', '603', '605', '688', '689', '900')):
+        return code + '.SH'
+    elif code.startswith(('000', '001', '002', '003', '300', '301', '200')):
+        return code + '.SZ'
+    elif code.startswith(('8', '4')):
+        return code + '.BJ'
+    else:
+        return code
+
+df = pd.read_csv(CSV_PATH)
+
+
+raw = pd.read_excel(URL.format(code="000009"), engine="xlrd", dtype=str)  # 下载+解析，一步
+
+
+# 按 code 看有没有重复，缺失值
+print("同一只股票只数:" + str(df['code'].duplicated().sum()))
+print("各自有无缺失值:" + str(df.isna().sum()))
+
+
+# 将code其中的数据补齐至六位与股票代码对应
+df['code'] = df['code'].astype(str).str.strip().str.zfill(6)
+# 为其添加不同交易所对应的后缀，直接用于之后的缺失值查询
+df['code'] = df['code'].apply(add_suffix)
+
+# 拉取20251212当日的所有股票的明细
+ts.set_token('4ea92729194a9a3a60f9c75dd60eb9a854622f774030aed003a3e329') 
+pro = ts.pro_api()
+market_data = pro.daily(trade_date='20251212')
+
+
+# 上证与df合并，取code和hold_vol列
+raw2 = raw[["成份券代码Constituent Code"]].copy()
+raw2 = raw2.rename(columns={"成份券代码Constituent Code": "code"})# pyright: ignore[reportCallIssue]
+raw2['code'] = raw2['code'].apply(add_suffix)
+df4 = df.copy()
+merged1 = raw2.merge(df4, on='code', how='left')
+merged1.dropna(inplace=True)
+merged1.reset_index(drop=True, inplace=True)
+
+# 与market_data1合并，取code，hold_vol和close列，并处理缺失值
+market_data1 = market_data[['ts_code','close']].copy()
+market_data1 = market_data1.rename(columns={'ts_code': 'code'})  # pyright: ignore[reportCallIssue]
+merged2 = merged1.merge(market_data1, on='code', how='left')
+missing = merged2[merged2['close'].isna()]
+print("含有close缺失值的股票代码\n"+ str(missing))
+merged2['close'] = merged2.apply(is_close, axis=1, args=(pro,))
+
+# 计算结果及耗时
+merged2['market_value'] = merged2.hold_vol * merged2.close
+k = merged2['market_value'].sum()
+print(f"上证380总市值: {k:.2f} 元")
+print(f"耗时: {time.perf_counter() - start:.2f} 秒")
+
+
+
+
+
+
