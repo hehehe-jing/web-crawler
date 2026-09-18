@@ -1,37 +1,30 @@
 import os
 import time
-import pandas as pd
-import numpy as np
-import tushare as ts
-import config
+import config  # pyright: ignore[reportImplicitRelativeImport]
 from PositionFile import PositionFile  # pyright: ignore[reportImplicitRelativeImport]
 from QuoteSource import QuoteSource  # pyright: ignore[reportImplicitRelativeImport]
 from Portfolio import Portfolio  # pyright: ignore[reportImplicitRelativeImport]
 start = time.perf_counter()
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CSV_PATH = os.path.join(BASE_DIR, '20251212.csv')
-
-pos = PositionFile(CSV_PATH)
-df = pos.df
-# print(df)
 
 token = config.TOKEN
-data = '20251212'
-before = '20251101'
-pos1 = QuoteSource(token, data,before)
-df1 = pos1.df
-# print(df1)
+start_date = config.START_DATE
+before_date = config.BEFORE_DATE
+CSV_PATH = config.CSV_PATH
 
-pos2 = Portfolio(df,df1)
-df2= pos2.df
+position = PositionFile(CSV_PATH)
+holdings = position.df
+# print(holdings)
+
+
+quotes = QuoteSource(token, start_date,before_date)
+snapshot = quotes.df
+# print(snapshot)
+
+pos2 = Portfolio(holdings,snapshot)
+book= pos2.df
 # print(df2)
 
-df2.close = df2.apply(pos1.is_close, axis=1)
+book.close = book.apply(quotes.last_close, axis=1)
 
-
-
-# print(df2)
-df2['market_value'] = df2.hold_vol * df2.close
-m = df2['market_value'].sum()
-print(f"总市值: {m:.2f} 元")
+print(f"总市值: {Portfolio.return_market_value(book):.2f} 元")
 print(f"耗时: {time.perf_counter() - start:.2f} 秒")
