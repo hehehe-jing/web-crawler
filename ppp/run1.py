@@ -22,7 +22,7 @@ snapshot = quotes.df
 
 pos2 = Portfolio(holdings,snapshot)
 book= pos2.df
-# print(df2)
+# print(book)
 
 book.close = book.apply(quotes.last_close, axis=1)
 
