@@ -18,19 +18,19 @@ holdings = position.df
 
 quotes = QuoteSource(token, start_date,before_date)
 snapshot = quotes.df
+pct_chg = quotes.pct_chg
 # print(snapshot)
 
-pct_chg = quotes.pct_chg
+
 
 pos2 = Portfolio(holdings,snapshot)
 book1= pos2.df
+# print(snapshot)
 
 book1.close = book1.apply(quotes.last_close, axis=1)
-# pre_close 用 close 填（停牌当天收益为 0）
 book1['pre_close'] = book1['pre_close'].fillna(book1['close'])
-
-# change 也补 0（或者用 close - pre_close）
 book1['change'] = book1['change'].fillna(0)
+# print(book1)
 
 ret_pct = Portfolio.return_ret_pct(book1)
 excess_pct = ret_pct-pct_chg
