@@ -1,46 +1,41 @@
 import os
 import time
-import pandas as pd
-import numpy as np
-import tushare as ts
-import config
-import crawler_simple
+import config  # pyright: ignore[reportImplicitRelativeImport]
+import crawler_simple  # pyright: ignore[reportImplicitRelativeImport]
 from PositionFile import PositionFile  # pyright: ignore[reportImplicitRelativeImport]
 from QuoteSource import QuoteSource  # pyright: ignore[reportImplicitRelativeImport]
 from Portfolio import Portfolio  # pyright: ignore[reportImplicitRelativeImport]
 
 start = time.perf_counter()
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CSV_PATH = os.path.join(BASE_DIR, '20251212.csv')
-
-pos = PositionFile(CSV_PATH)
-df = pos.df
-# print(df)
-
 token = config.TOKEN
-data = '20251212'
-before = '20251101'
-pos1 = QuoteSource(token, data,before)
-df1 = pos1.df
-# print(df1)
-raw2 = crawler_simple.get_constituents("000009")  # 爬虫：下载+解析，返回 code 列
+start_date = config.START_DATE
+before_date = config.BEFORE_DATE
+CSV_PATH = config.CSV_PATH
 
-raw2['code'] = raw2['code'].apply(pos.add_suffix)
+position = PositionFile(CSV_PATH)
+holdings = position.df
+# print(holdings)
+
+quotes = QuoteSource(token, start_date,before_date)
+snapshot = quotes.df
+
+cons_codes = crawler_simple.get_constituents("000009")  # 爬虫：下载+解析，返回 code 列
+
+cons_codes['code'] = cons_codes['code'].apply(position.add_suffix)
 # print(raw2)
-pos2 = Portfolio(raw2,df)
-df2= pos2.df
+pos2 = Portfolio(cons_codes,holdings)
+book1= pos2.df
 # print(df2)
-df2.dropna(inplace=True)
-df2.reset_index(drop=True, inplace=True)
+book1.dropna(inplace=True)
+book1.reset_index(drop=True, inplace=True)
 
-pos3 = Portfolio(df2,df1)
-df3= pos3.df
+pos3 = Portfolio(book1,snapshot)
+book2= pos3.df
 # print(df2)
 
-df3.close = df3.apply(pos1.is_close, axis=1)
+book2.close = book2.apply(quotes.last_close, axis=1)
 
-df3['market_value'] = df3.hold_vol * df3.close
-m = df3['market_value'].sum()
-print(f"380中证总市值: {m:.2f} 元")
+
+print(f"380中证总市值: {Portfolio.return_market_value(book2):.2f} 元")
 print(f"耗时: {time.perf_counter() - start:.2f} 秒")
