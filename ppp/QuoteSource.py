@@ -8,11 +8,11 @@ import requests
 
 class QuoteSource:
 
-    def __init__(self, token, trade_date, before):
+    def __init__(self, token, trade_date, before_date):
         ts.set_token(token)
         self.pro = ts.pro_api()
         self.trade_date = trade_date
-        self.before = before
+        self.before = before_date
         self.cache = {}
 
         df1 = self.pro.daily(trade_date=trade_date)
@@ -27,10 +27,11 @@ class QuoteSource:
         prev, cur = float(rows[-2][2]), float(rows[-1][2])
         pct_chg = (cur - prev) / prev * 100
 
+
         self.df = df
         self.pct_chg = pct_chg
 
-    def is_close(self, row):  # 去掉 @staticmethod
+    def last_close(self, row):  # 去掉 @staticmethod
         if not pd.isna(row['close']):
             return row['close']
 
