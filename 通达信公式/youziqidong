@@ -6,6 +6,48 @@ ABC6:=EMA(DIK,1),COLORGREEN;
 IF(C>ABC6,ABC6,DRAWNULL),COLORRED,LINETHICK3;
 IF(ABC6<=REF(ABC6,1),ABC6,DRAWNULL),COLORGREEN,LINETHICK3;
 启动点:=VAR1< 0 AND VAR1>REF(VAR1 ,1) AND REF(VAR1 ,1)< REF(VAR1 ,2) AND REF(VAR1 ,2)< REF(VAR1 ,3) AND REF(VAR1 ,3)< REF(VAR1 ,4);
+ABC_16:IF(CLOSE>REF(CLOSE,1),88,0);
+ABC_17:IF(CLOSE/REF(CLOSE,1)>1.05 AND HIGH/CLOSE< 1.01 AND ABC_16>0,91,0);
+前收盘价:REF(CLOSE,1), NODRAW;
+收盘价:CLOSE,NODRAW;
+最高价:HIGH,NODRAW;
+龙头启动:=FILTER(ABC_17>90,45)=1,COLORMAGENTA NODRAW;
+STICKLINE(龙头启动,6,VAR1,2,0),COLORMAGENTA;
+STICKLINE(龙头启动,6,VAR1,0.1,0),COLORRED;
+分界线:0,COLORFF00FF;
+STICKLINE(VAR1>REF(VAR1,1) AND VAR1>0,0,2,1.8,0),COLOR000055;
+STICKLINE(VAR1>REF(VAR1,1) AND VAR1>0,0,2,1.1,0),COLOR000099;
+STICKLINE(VAR1>REF(VAR1,1) AND VAR1>0,0,2,0.6,0),COLOR0000BB;
+STICKLINE(VAR1<=REF(VAR1,1) AND VAR1>0,0,2,1.8,1),COLOR40FF00;
+STICKLINE(VAR1<=REF(VAR1,1) AND VAR1>0,0,2,1.1,1),COLOR40FF00;
+STICKLINE(VAR1<=REF(VAR1,1) AND VAR1>0,0,2,0.6,1),COLOR40FF00;
+STICKLINE(VAR1>REF(VAR1,1) AND VAR1< 0,0,VAR1,1.8,0),COLOR000055;
+STICKLINE(VAR1>REF(VAR1,1) AND VAR1< 0,0,VAR1,1.1,0),COLOR000099;
+STICKLINE(VAR1>REF(VAR1,1) AND VAR1< 0,0,VAR1,0.6,0),COLOR0000BB;
+STICKLINE(VAR1<=REF(VAR1,1) AND VAR1< 0,0,VAR1,1.8,0),COLORBLUE;
+STICKLINE(VAR1<=REF(VAR1,1) AND VAR1< 0,0,VAR1,1.1,0),COLORBLUE;
+STICKLINE(VAR1<=REF(VAR1,1) AND VAR1< 0,0,VAR1,0.6,0),COLORBLUE;
+DRAWICON(龙头启动,6,9);
+DRAWTEXT(龙头启动,5.6,'★游资启动')COLORYELLOW LINETHICK6;
+
+
+
+
+
+#!/usr/bin/python3
+# -*- encoding: utf-8 -*-
+"""
+
+通达信公式原文（本模块逐行翻译; STICKLINE 画柱与 COLOR* 仅为绘图辅助, NODRAW
+为不画线, 均不产生输出列, 真正输出的只有下述 NODRAW/赋值系列）:
+DIF:EMA(CLOSE,9)-EMA(CLOSE,150),NODRAW;
+ABC:EMA(DIF,12),NODRAW;
+VAR1:2*(DIF-ABC),COLORSTICK;
+DIK:4*DIF-3*ABC,COLORYELLOW;
+ABC6:=EMA(DIK,1),COLORGREEN;
+IF(C>ABC6,ABC6,DRAWNULL),COLORRED,LINETHICK3;
+IF(ABC6<=REF(ABC6,1),ABC6,DRAWNULL),COLORGREEN,LINETHICK3;
+启动点:=VAR1< 0 AND VAR1>REF(VAR1 ,1) AND REF(VAR1 ,1)< REF(VAR1 ,2) AND REF(VAR1 ,2)< REF(VAR1 ,3) AND REF(VAR1 ,3)< REF(VAR1 ,4);
 ABC_16:=IF(CLOSE>REF(CLOSE,1),88,0);
 ABC_17:=IF(CLOSE/REF(CLOSE,1)>1.05 AND HIGH/CLOSE< 1.01 AND ABC_16>0,91,0);
 龙头启动:=FILTER(ABC_17>90,45)=1,COLORMAGENTA NODRAW;
@@ -26,3 +68,190 @@ STICKLINE(VAR1<=REF(VAR1,1) AND VAR1< 0,0,VAR1,1.1,0),COLORBLUE;
 STICKLINE(VAR1<=REF(VAR1,1) AND VAR1< 0,0,VAR1,0.6,0),COLORBLUE;
 DRAWICON(龙头启动,6,9);
 DRAWTEXT(龙头启动,5.6,'★游资启动')COLORYELLOW LINETHICK6;
+
+"""
+from loguru import logger
+import time
+import numpy as np
+import pandas as pd
+
+def tdx_ema(sr: pd.Series, n):
+    return sr.ewm(alpha=2 / (n + 1), adjust=False).mean()
+
+def filter_tdx_correct(cond:pd.Series, n:int)->pd.Series:
+    cond_arr = cond.to_numpy(bool)
+    idx_arr = np.arange(len(cond_arr))
+    hits = idx_arr[cond_arr]
+    if hits.size == 0:
+        return pd.Series(np.zeros_like(cond_arr,int), index=cond.index)
+    valid = []
+    last = -np.inf
+    for pos in hits:
+        if pos > last:
+            valid.append(pos)
+            last = pos + n
+    res = np.zeros_like(cond_arr, dtype=int)
+    res[valid] = 1
+    return pd.Series(res, index=cond.index)
+
+def calc_code_day(ser:pd.Series):
+        # ser: yzgdqdf_yzqd，按时间升序
+        cd = []
+        last_cd = 0
+        for flag in ser:
+            if flag == 1:
+                last_cd = 0 
+            else:
+                last_cd += 1
+            cd.append(last_cd)
+        return pd.Series(cd, index=ser.index)
+
+
+def warm__yzgdqdf(pre_daybar):
+
+#日线数据
+    pre_daybar = pre_daybar[["symbol", "date", "close","preClose","high"]].copy()
+    pre_daybar = pre_daybar.sort_values(["symbol", "date"]).reset_index(drop=True)
+    pre_daybar["yzgdqdf_abc16"]=np.where(pre_daybar['close']>pre_daybar['preClose'],88,0)
+
+    pre_daybar["yzgdqdf_abc17"]=np.where(((pre_daybar['close']/pre_daybar['preClose'])>1.05)&((pre_daybar["high"]/pre_daybar['close'])<1.01)&(pre_daybar["yzgdqdf_abc16"]>0),91,0)
+    pre_daybar["yzgdqdf_yzqd"]=pre_daybar.groupby("symbol")["yzgdqdf_abc17"].transform(
+    lambda s: filter_tdx_correct(s>90,45)
+)
+    pre_daybar["code_day"] = pre_daybar.groupby("symbol")["yzgdqdf_yzqd"].transform(calc_code_day)
+
+    return pre_daybar
+
+
+
+def calc_today__yzgdqdf(this_minbar, pre_daybar): 
+
+    this_minbar["day_high"] = this_minbar.groupby(["symbol"])["high"].cummax()
+    this_minbar["yzgdqdf_abc16"]=np.where(this_minbar['close']>this_minbar['close_pre'],88,0)
+    this_minbar["yzgdqdf_abc17"]=np.where(((this_minbar['close']/this_minbar['close_pre'])>1.05)&((this_minbar["day_high"]/this_minbar['close'])<1.01)&(this_minbar["yzgdqdf_abc16"]>0),91,0)
+    
+    this_minbar["yzgdqdf_yzqd_pre"]=np.where((this_minbar['yzgdqdf_abc17']>0)&(this_minbar["code_day_pre"]>=45),1,0)
+    
+    this_minbar["yzgdqdf_yzqd"]=np.where((this_minbar['yzgdqdf_yzqd_pre']==1),1,0)
+
+    drop_c = [
+        'day_high','yzgdqdf_abc16',"yzgdqdf_abc17","yzgdqdf_yzqd_pre"]
+    this_minbar.drop(columns=[c for c in drop_c if c in this_minbar.columns], inplace=True)
+    return this_minbar
+
+def calc__yzgdqdf(this_minbar, pre_daybar):
+
+    pre_daybar = warm__yzgdqdf(pre_daybar)
+    tdf = pre_daybar.sort_values(['symbol', 'date',], ascending=True).drop_duplicates(['symbol'], keep='last')
+    use_c = ["symbol","close","code_day"]
+    tdf = tdf[use_c]
+    r_c = {c: f"{c}_pre" for c in use_c if c != "symbol"}
+    tdf.rename(columns=r_c, inplace=True)
+    this_minbar = pd.merge(this_minbar, tdf, on="symbol", how="left")
+    _t0 = time.perf_counter()
+    this_minbar = calc_today__yzgdqdf(this_minbar,tdf)
+    _t1 = time.perf_counter()
+    logger.info(f"[耗时] calc_today__yzgdqdf ) {_t1 - _t0:>8.2f} 秒")
+    return this_minbar  
+
+
+
+
+
+
+
+
+--- this_minbar ---
+symbol                           object  non_null=630047  eg='000001.SZ'
+time                             object  non_null=630047  eg='09:31:00'
+date                             int64  non_null=630047  eg=np.int64(20260908)
+unixtime                         int64  non_null=630047  eg=np.int64(1788831060000)
+open                             float64  non_null=630047  eg=np.float64(11.66)
+high                             float64  non_null=630047  eg=np.float64(11.73)
+low                              float64  non_null=630047  eg=np.float64(11.65)
+close                            float64  non_null=630047  eg=np.float64(11.719999999999999)
+volume                           float64  non_null=630047  eg=np.float64(31764.0)
+amount                           float64  non_null=630047  eg=np.float64(37105110.0)
+mdata_time                       object  non_null=630047  eg='2026-09-08 09:31:01'
+bidMostAmountL1                  float64  non_null=629821  eg=np.float64(22543519.0)  [L1: l1transaction1m rename 带后缀]
+offMostAmountL1                  float64  non_null=629821  eg=np.float64(11136583.0)  [L1: l1transaction1m rename 带后缀]
+bidTotalAmountL1                 float64  non_null=629821  eg=np.float64(24543614.0)  [L1: l1transaction1m rename 带后缀]
+offTotalAmountL1                 float64  non_null=629821  eg=np.float64(12561496.0)  [L1: l1transaction1m rename 带后缀]
+bidMostAmountL2                  float64  non_null=350171  eg=np.float64(0.0)  [L2: l2transaction1m rename 带后缀]
+bidBigAmountL2                   float64  non_null=350171  eg=np.float64(8375812.0)  [L2: l2transaction1m rename 带后缀]
+bidMediumAmountL2                float64  non_null=350171  eg=np.float64(9134199.0)  [L2: l2transaction1m rename 带后缀]
+bidSmallAmountL2                 float64  non_null=350171  eg=np.float64(4702753.0)  [L2: l2transaction1m rename 带后缀]
+unactiveBidMostAmountL2          float64  non_null=350171  eg=np.float64(0.0)  [L2: l2transaction1m rename 带后缀]
+unactiveBidBigAmountL2           float64  non_null=350171  eg=np.float64(2019478.0)  [L2: l2transaction1m rename 带后缀]
+unactiveBidMediumAmountL2        float64  non_null=350171  eg=np.float64(6819102.0)  [L2: l2transaction1m rename 带后缀]
+unactiveBidSmallAmountL2         float64  non_null=350171  eg=np.float64(5121107.0)  [L2: l2transaction1m rename 带后缀]
+offMostAmountL2                  float64  non_null=350171  eg=np.float64(0.0)  [L2: l2transaction1m rename 带后缀]
+offBigAmountL2                   float64  non_null=350171  eg=np.float64(4322924.6)  [L2: l2transaction1m rename 带后缀]
+offMediumAmountL2                float64  non_null=350171  eg=np.float64(6923536.0)  [L2: l2transaction1m rename 带后缀]
+offSmallAmountL2                 float64  non_null=350171  eg=np.float64(2713226.4)  [L2: l2transaction1m rename 带后缀]
+unactiveOffMostAmountL2          float64  non_null=350171  eg=np.float64(3748376.0)  [L2: l2transaction1m rename 带后缀]
+unactiveOffBigAmountL2           float64  non_null=350171  eg=np.float64(7442888.4)  [L2: l2transaction1m rename 带后缀]
+unactiveOffMediumAmountL2        float64  non_null=350171  eg=np.float64(7799228.6)  [L2: l2transaction1m rename 带后缀]
+unactiveOffSmallAmountL2         float64  non_null=350171  eg=np.float64(3222271.0)  [L2: l2transaction1m rename 带后缀]
+netInflowMostAmountL2            float64  non_null=350171  eg=np.float64(-3748376.0)  [L2: l2transaction1m rename 带后缀]
+netInflowBigAmountL2             float64  non_null=350171  eg=np.float64(-1370523.0)  [L2: l2transaction1m rename 带后缀]
+netInflowMediumAmountL2          float64  non_null=350171  eg=np.float64(1230536.4000000004)  [L2: l2transaction1m rename 带后缀]
+netInflowSmallAmountL2           float64  non_null=350171  eg=np.float64(3888362.5999999996)  [L2: l2transaction1m rename 带后缀]
+index_close                      float64  non_null=630047  eg=np.float64(13751.836199999998)
+name                             object  non_null=630047  eg='平安银行'
+open_day                         float64  non_null=630047  eg=np.float64(11.66)
+high_day                         float64  non_null=630047  eg=np.float64(11.79)
+low_day                          float64  non_null=630047  eg=np.float64(11.65)
+close_day                        float64  non_null=630047  eg=np.float64(11.729999999999999)
+preClose                         float64  non_null=630047  eg=np.float64(11.7)
+circulating_capital              float64  non_null=630047  eg=np.float64(19405684991.0)
+signal_pct                       float64  non_null=630047  eg=np.float64(0.17)
+open_pct                         float64  non_null=630047  eg=np.float64(-0.34)
+close_pct                        float64  non_null=630047  eg=np.float64(0.26)
+net_pnl                          float64  non_null=630047  eg=np.float64(0.6)
+signal_pnl                       float64  non_null=630047  eg=np.float64(0.09)
+data_idx                         int64  non_null=630047  eg=np.int64(0)
+
+--- pre_daybar ---
+symbol                           object  non_null=2090131  eg='000001.SZ'
+name                             object  non_null=2090131  eg='平安银行'
+unixtime                         int64  non_null=2090131  eg=np.int64(1736092800000)
+date                             int64  non_null=2090131  eg=np.int64(20250106)
+time                             object  non_null=2090131  eg='00:00:00'
+open                             float64  non_null=2090131  eg=np.float64(11.38)
+high                             float64  non_null=2090131  eg=np.float64(11.48)
+low                              float64  non_null=2090131  eg=np.float64(11.22)
+close                            float64  non_null=2090131  eg=np.float64(11.440000000000001)
+preClose                         float64  non_null=2090131  eg=np.float64(11.38)
+volume                           float64  non_null=2090131  eg=np.float64(1085536.0)
+amount                           float64  non_null=2090131  eg=np.float64(1234305778.0)
+circulating_capital              float64  non_null=2089896  eg=np.float64(19405617528.0)
+bidMostAmountL1                  float64  non_null=2081206  eg=np.float64(290310628.0)  [L1: l1transaction1m rename 带后缀]
+offMostAmountL1                  float64  non_null=2081206  eg=np.float64(328077278.0)  [L1: l1transaction1m rename 带后缀]
+bidTotalAmountL1                 float64  non_null=2081206  eg=np.float64(608520073.0)  [L1: l1transaction1m rename 带后缀]
+offTotalAmountL1                 float64  non_null=2081206  eg=np.float64(625785701.0)  [L1: l1transaction1m rename 带后缀]
+bidMostAmountL2                  float64  non_null=874428  eg=np.float64(81210936.0)  [L2: l2transaction1m rename 带后缀]
+bidBigAmountL2                   float64  non_null=874428  eg=np.float64(56424074.0)  [L2: l2transaction1m rename 带后缀]
+bidMediumAmountL2                float64  non_null=874428  eg=np.float64(98615497.0)  [L2: l2transaction1m rename 带后缀]
+bidSmallAmountL2                 float64  non_null=874428  eg=np.float64(88123642.0)  [L2: l2transaction1m rename 带后缀]
+unactiveBidMostAmountL2          float64  non_null=874428  eg=np.float64(69451251.0)  [L2: l2transaction1m rename 带后缀]
+unactiveBidBigAmountL2           float64  non_null=874428  eg=np.float64(63908511.0)  [L2: l2transaction1m rename 带后缀]
+unactiveBidMediumAmountL2        float64  non_null=874428  eg=np.float64(95995608.0)  [L2: l2transaction1m rename 带后缀]
+unactiveBidSmallAmountL2         float64  non_null=874428  eg=np.float64(80043103.0)  [L2: l2transaction1m rename 带后缀]
+offMostAmountL2                  float64  non_null=874428  eg=np.float64(41393066.0)  [L2: l2transaction1m rename 带后缀]
+offBigAmountL2                   float64  non_null=874428  eg=np.float64(52340525.0)  [L2: l2transaction1m rename 带后缀]
+offMediumAmountL2                float64  non_null=874428  eg=np.float64(104334355.0)  [L2: l2transaction1m rename 带后缀]
+offSmallAmountL2                 float64  non_null=874428  eg=np.float64(111330528.0)  [L2: l2transaction1m rename 带后缀]
+unactiveOffMostAmountL2          float64  non_null=874428  eg=np.float64(51299977.0)  [L2: l2transaction1m rename 带后缀]
+unactiveOffBigAmountL2           float64  non_null=874428  eg=np.float64(67278955.0)  [L2: l2transaction1m rename 带后缀]
+unactiveOffMediumAmountL2        float64  non_null=874428  eg=np.float64(116170104.0)  [L2: l2transaction1m rename 带后缀]
+unactiveOffSmallAmountL2         float64  non_null=874428  eg=np.float64(89625113.0)  [L2: l2transaction1m rename 带后缀]
+netInflowMostAmountL2            float64  non_null=874428  eg=np.float64(57969144.0)  [L2: l2transaction1m rename 带后缀]
+netInflowBigAmountL2             float64  non_null=874428  eg=np.float64(713105.0)  [L2: l2transaction1m rename 带后缀]
+netInflowMediumAmountL2          float64  non_null=874428  eg=np.float64(-25893354.0)  [L2: l2transaction1m rename 带后缀]
+netInflowSmallAmountL2           float64  non_null=874428  eg=np.float64(-32788896.0)  [L2: l2transaction1m rename 带后缀]
+index_close                      float64  non_null=2090131  eg=np.float64(9885.655)
+turnover_rate                    float64  non_null=2089896  eg=np.float64(0.0055939265959132735)
+
+
+
