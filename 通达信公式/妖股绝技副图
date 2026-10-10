@@ -1,0 +1,199 @@
+# 均54:=MA(CLOSE,54);
+# 生命线:=MA(CLOSE,8);
+# 偏均54:=((CLOSE-均54)/均54)< 0.1;
+# 偏生命线:=((CLOSE-生命线)/生命线)< 0.3;
+# 偏离率:=IF(偏均54 AND 偏生命线,0.2,0);
+# 平台突破:=IF((偏离率=0 AND REF(偏离率,1)=0.2 AND REF(COUNT(偏离率=0.2,10)=10,1)),-0.1,0);
+# 妖股标签突破:=平台突破=-0.1;
+# 逐步见底:=(REF(CLOSE,3)-CLOSE)/REF(CLOSE,3)*100>5;
+# 底部初成:=FILTER(逐步见底,10);
+# 距前跌:=BARSLAST(底部初成);
+# 妖股复苏:=REF(HIGH,距前跌+2);
+# 妖股修复:=REF(HIGH,距前跌+1);
+# 全线见底:=REF(HIGH,距前跌);
+# 强势凸显:=MAX(妖股复苏,妖股修复);
+# 强者恒强:=MAX(强势凸显,全线见底);
+# 涨超5:=(CLOSE-REF(CLOSE,1))/REF(CLOSE,1)*100>5;
+# 距跌150:=距前跌< 150;
+# 开低30:=(OPEN-强者恒强)/强者恒强*100< 30;
+# 涨低50:=(CLOSE-LLV(LOW,距前跌))/LLV(LOW,距前跌)*100< 50;
+# 涨低30:=(CLOSE-REF(OPEN,5))/REF(OPEN,5)*100< 30;
+# 量低35:=VOL/MA(VOL,5)< 3.5;
+# 涨低80:=(CLOSE-REF(CLOSE,89))/REF(CLOSE,89)*100< 80;
+# 妖股成型:=涨超5 AND 距跌150 AND 开低30 AND 涨低50 AND 涨低30 AND 量低35 AND 涨低80;
+# 暴利:=FILTER(妖股成型,15);
+# 妖股明牌:=暴利 OR 妖股标签突破;
+# 放量涨:=(VOL/REF(VOL,1)>1.2 AND CLOSE>OPEN) OR (LOW>REF(HIGH,1) AND OPEN>CLOSE AND VOL/REF(VOL,1)>1.2);
+# 涨超5A:=(DYNAINFO(7)/REF(CLOSE,1)>1.05 AND DYNAINFO(7)/O>1.05);
+# 妖股标签选股:妖股明牌 AND C/REF(C,1)>1.095 AND 放量涨 AND 涨超5A;
+
+from loguru import logger
+import time
+import numpy as np
+import pandas as pd
+
+def tdx_ema(sr: pd.Series, n):
+    return sr.ewm(alpha=2 / (n + 1), adjust=False).mean()
+def tdx_ema1(sr: pd.Series, sr1: pd.Series,n):
+    alpha=2 / (n + 1)
+    return sr*alpha + sr1*(1-alpha)
+
+def hhv(sr:pd.Series,n):
+    return sr.rolling(n).max()
+
+def llv(sr:pd.Series,n):
+    return sr.rolling(n).min()
+
+def tdx_ma(series: pd.Series, n: int):
+    return series.rolling(n).mean()
+
+def sum_1(series: pd.Series, n: int):
+    return series.rolling(n).sum()
+
+# 将有信号的标为1，无信号的标为0，而且在本次信号出现后，n天内不再出现信号
+def filter_tdx(cond, n):
+    cond_values = cond.values
+    res = np.zeros(len(cond_values), dtype=int)
+    last = -999
+    for i in range(len(cond_values)):
+        if cond_values[i] == 1 and i - last > n:
+            res[i] = 1
+            last = i
+    return pd.Series(res, index=cond.index)
+
+def calc_code_day(ser):
+    groups = (ser == 1).cumsum()          # 每遇到一次信号，组号 +1
+    return ser.groupby(groups).cumcount() # 组内从 0 开始编号
+
+def ref_bottom_high(pre_daybar, extra=0):
+    high_lag = pre_daybar.groupby('symbol')['high'].shift(extra)
+    bottom_high  = high_lag.where(pre_daybar['initial_bottoming'] == 1)
+    return bottom_high.groupby(pre_daybar['symbol']).ffill()
+
+def llv_since_bottom(pre_daybar):
+    seg = pre_daybar.groupby('symbol')['initial_bottoming'].cumsum()
+    return pre_daybar.groupby(['symbol', seg])['low'].cummin()
+
+def daily_date(pre_daybar):
+    pre_daybar = pre_daybar[['symbol','date','high','low','close','open','preClose','volume']].copy()
+    pre_daybar = pre_daybar.sort_values(['symbol','date']).reset_index(drop = True)
+
+    pre_daybar['jun_54'] = pre_daybar.groupby('symbol')['close'].transform(lambda x: x.rolling(54).mean())
+    pre_daybar['life_8'] = pre_daybar.groupby('symbol')['close'].transform(lambda x: x.rolling(8).mean())
+    pre_daybar['pian_jun'] = np.where((pre_daybar['close'] - pre_daybar['jun_54'])/pre_daybar['jun_54'] < 0.1, 1, 0)
+    pre_daybar['pian_life'] = np.where((pre_daybar['close'] - pre_daybar['life_8'])/pre_daybar['life_8'] < 0.3, 1, 0)
+    pre_daybar['deviation'] = np.where((pre_daybar['pian_jun'] == 1) & (pre_daybar['pian_life'] == 1), 0.2, 0)
+    pre_daybar['deviation_is'] = np.where(pre_daybar['deviation'] == 0.2, 1, 0)
+    pre_daybar['deviation_count'] = np.where(pre_daybar.groupby('symbol')['deviation_is'].transform(lambda x: x.rolling(10).sum()) == 10, 1, 0)
+    pre_daybar['breakout'] = np.where(( pre_daybar['deviation'] == 0) & (pre_daybar.groupby('symbol')['deviation'].shift(1) == 0.2) & (pre_daybar.groupby('symbol')['deviation_count'].shift(1) == 1),-0.1,0)
+    pre_daybar['demon_stock_tag_breakout'] = np.where(pre_daybar['breakout'] == -0.1,1,0)
+
+    pre_daybar['gradual_bottoming'] = np.where((pre_daybar.groupby('symbol')['close'].shift(3)-pre_daybar['close'])/pre_daybar.groupby('symbol')['close'].shift(3)*100 > 5,1,0)
+    pre_daybar['initial_bottoming'] = pre_daybar.groupby('symbol')['gradual_bottoming'].transform(lambda s: filter_tdx(s>0,10))
+    pre_daybar["code_day"] = pre_daybar.groupby("symbol")["initial_bottoming"].transform(calc_code_day)
+
+    pre_daybar["demon_stock_recovery"] = ref_bottom_high(pre_daybar, extra=2)
+    pre_daybar["demon_stock_repair"] = ref_bottom_high(pre_daybar, extra=1)
+    pre_daybar["full_bottoming"] = ref_bottom_high(pre_daybar, extra=0)
+    pre_daybar["strength_emerges"] = np.maximum(pre_daybar["demon_stock_recovery"],pre_daybar["demon_stock_repair"])
+    pre_daybar["strength_persists"] = np.maximum(pre_daybar["strength_emerges"],pre_daybar["full_bottoming"])
+
+    pre_daybar["zhangchao_5"] = np.where((pre_daybar['close']-pre_daybar['preClose'])/pre_daybar['preClose']*100 > 5,1,0)
+    pre_daybar["judie_150"] = np.where(pre_daybar["code_day"] < 150,1,0)
+    pre_daybar["kaidi_30"] = np.where((pre_daybar['open']-pre_daybar["strength_persists"])/pre_daybar["strength_persists"]*100 < 30,1,0)
+    pre_daybar["zhangdi_50_1"] = llv_since_bottom(pre_daybar)
+    pre_daybar["zhangdi_50"] = np.where((pre_daybar['close']-pre_daybar["zhangdi_50_1"])/pre_daybar["zhangdi_50_1"]*100 < 50,1,0)
+    pre_daybar["zhangdi_30"] = np.where((pre_daybar['close']-pre_daybar.groupby('symbol')['open'].shift(5))/pre_daybar.groupby('symbol')['open'].shift(5)*100 < 30,1,0)
+    pre_daybar["liangdi_35"] = np.where(pre_daybar['volume']/pre_daybar.groupby('symbol')['volume'].transform(lambda s: s.rolling(5).mean()) < 3.5,1,0)
+    pre_daybar["zhangdi_80"] = np.where((pre_daybar['close']-pre_daybar.groupby('symbol')['close'].shift(89))/pre_daybar.groupby('symbol')['close'].shift(89)*100 < 80,1,0)
+    pre_daybar["yaoguchengxing"] = np.where((pre_daybar["zhangchao_5"] == 1) & (pre_daybar["judie_150"] == 1) & (pre_daybar["kaidi_30"] == 1) & (pre_daybar["zhangdi_50"] == 1) & (pre_daybar["zhangdi_30"] == 1) & (pre_daybar["liangdi_35"] == 1) & (pre_daybar["zhangdi_80"] == 1),1,0)
+    pre_daybar['baoli'] = pre_daybar.groupby('symbol')['yaoguchengxing'].transform(lambda s: filter_tdx(s>0,15))
+    pre_daybar["code_day1"] = pre_daybar.groupby("symbol")["baoli"].transform(calc_code_day)
+    pre_daybar["yaogumingpai"] = np.where((pre_daybar["baoli"] == 1) | (pre_daybar['demon_stock_tag_breakout'] == 1),1,0)
+    pre_daybar["fangliangzhang"] = np.where(((pre_daybar['volume']/pre_daybar.groupby('symbol')['volume'].shift(1) > 1.2) & (pre_daybar['close'] > pre_daybar['open'])) | ((pre_daybar['low'] > pre_daybar.groupby('symbol')['high'].shift(1)) & (pre_daybar['close'] < pre_daybar['open']) & (pre_daybar['volume']/pre_daybar.groupby('symbol')['volume'].shift(1) > 1.2)),1,0)
+    pre_daybar['zhangchao_5A'] = np.where((pre_daybar['close'] / pre_daybar['preClose'] > 1.05)  & (pre_daybar['close'] / pre_daybar['open'] > 1.05),1,0)
+    pre_daybar['yaogubiaoqianxuangu'] = np.where((pre_daybar["yaogumingpai"]) & (pre_daybar['close'] / pre_daybar['preClose'] > 1.095) & (pre_daybar["fangliangzhang"]) & (pre_daybar['zhangchao_5A']),1,0)
+
+
+    # 分钟线所需要的数据
+    pre_daybar['jun_53'] = pre_daybar.groupby('symbol')['close'].transform(lambda x: x.rolling(53).sum())
+    pre_daybar['life_7'] = pre_daybar.groupby('symbol')['close'].transform(lambda x: x.rolling(7).sum())
+    pre_daybar['colse_2'] = pre_daybar.groupby('symbol')['close'].shift(2)
+    pre_daybar["judie_149"] = np.where(pre_daybar["code_day"] < 149,1,0)
+    pre_daybar["open_4"] = pre_daybar.groupby('symbol')['open'].shift(4)
+    pre_daybar['volume_4'] = pre_daybar.groupby('symbol')['volume'].transform(lambda x: x.rolling(4).sum())
+    pre_daybar['colse_88'] = pre_daybar.groupby('symbol')['close'].shift(88)
+
+    return pre_daybar
+
+
+def minbar_date(this_minbar, pre_daybar):
+    this_minbar['low'] = this_minbar.groupby('symbol')['low'].cummin()
+    this_minbar['high'] = this_minbar.groupby('symbol')['high'].cummax()
+    this_minbar['volume'] = this_minbar.groupby('symbol')['volume'].cumsum()
+    this_minbar['jun_54'] = (this_minbar['close']+this_minbar['jun_53_pre'])/54
+    this_minbar['shengmingxian_8'] = (this_minbar['close']+this_minbar['life_7_pre'])/8
+    this_minbar['pianjun_54'] = np.where((this_minbar['close'] - this_minbar['jun_54'])/this_minbar['jun_54'] < 0.1, 1, 0)
+    this_minbar['pian_life'] = np.where((this_minbar['close'] - this_minbar['shengmingxian_8'])/this_minbar['shengmingxian_8'] < 0.3, 1, 0)
+    this_minbar['deviation'] = np.where((this_minbar['pianjun_54']) & (this_minbar['pian_life']), 0.2, 0)
+
+    this_minbar['deviation_is'] = np.where(this_minbar['deviation'] == 0.2, 1, 0)
+    this_minbar['breakout'] = np.where(( this_minbar['deviation'] == 0) & (this_minbar['deviation_pre'] == 0.2) & (this_minbar['deviation_count_pre'] == 1),-0.1,0)
+    this_minbar['demon_stock_tag_breakout'] = np.where(this_minbar['breakout'] == -0.1,1,0)
+
+    this_minbar['gradual_bottoming'] = np.where((this_minbar['colse_2_pre']-this_minbar['close'])/this_minbar['colse_2_pre']*100 > 5,1,0)
+    this_minbar['dibuchucheng'] = np.where((this_minbar['gradual_bottoming'])&(this_minbar['code_day_pre'] > 9),1,0)
+
+
+    this_minbar['zhangchao_5'] = np.where((this_minbar['close']-this_minbar['preClose'])/this_minbar['preClose']*100 > 5,1,0)
+    this_minbar['judie_150'] = np.where(this_minbar["judie_149_pre"] == 1,1,0)
+    this_minbar['kaidi_30'] = np.where((this_minbar["open_day"]-this_minbar['strength_persists_pre'])/this_minbar['strength_persists_pre']*100 < 30,1,0)
+    this_minbar['juqiandie_low'] = np.minimum(this_minbar['low'],this_minbar['zhangdi_50_1_pre'])
+    this_minbar['zhangdi_50'] = np.where((this_minbar["close"]-this_minbar['juqiandie_low'])/this_minbar['juqiandie_low']*100 < 50,1,0)
+    this_minbar['zhangdi_30'] = np.where((this_minbar["close"]-this_minbar['open_4_pre'])/this_minbar['open_4_pre']*100 < 30,1,0)
+    this_minbar['liangdi_35'] = np.where(this_minbar['volume']/((this_minbar['volume']+this_minbar['volume_4_pre'])/5) < 3.5,1,0)
+    this_minbar['zhangdi_80'] = np.where((this_minbar["close"]-this_minbar['colse_88_pre'])/this_minbar['colse_88_pre']*100 < 80,1,0)
+    this_minbar['yaoguchengxing'] = np.where((this_minbar['zhangchao_5'])&(this_minbar['judie_150'])&(this_minbar['kaidi_30'])&(this_minbar['zhangdi_50'])&(this_minbar['zhangdi_30'])&(this_minbar['liangdi_35'])&(this_minbar['zhangdi_80']),1,0)
+    this_minbar['baoli'] = np.where((this_minbar['yaoguchengxing'])&(this_minbar['code_day1_pre'] > 14),1,0)
+    this_minbar['yaogumingpai'] =  np.where((this_minbar['baoli']) | (this_minbar['demon_stock_tag_breakout']),1,0)
+    
+    this_minbar["fangliangzhang"] = np.where(((this_minbar['volume']/this_minbar['volume_pre'] > 1.2) & (this_minbar['close'] > this_minbar['open_day'])) | ((this_minbar['low'] > this_minbar['high_pre']) & (this_minbar['close'] < this_minbar['open_day']) & (this_minbar['volume']/this_minbar['volume_pre'] > 1.2)),1,0)
+    this_minbar['zhangchao_5A'] = np.where((this_minbar['close'] / this_minbar['preClose'] > 1.05)  & (this_minbar['close'] / this_minbar['open_day'] > 1.05),1,0)
+    this_minbar['yaogubiaoqianxuangu'] = np.where((this_minbar["yaogumingpai"]) & (this_minbar['close'] / this_minbar['preClose'] > 1.095) & (this_minbar["fangliangzhang"]) & (this_minbar['zhangchao_5A']),1,0)
+
+
+    return this_minbar
+
+
+def calc__yzgdqdf(this_minbar, pre_daybar):
+
+    pre_daybar = daily_date(pre_daybar)
+    tdf = pre_daybar.sort_values(['symbol', 'date',], ascending=True).drop_duplicates(['symbol'], keep='last')
+    use_c = ['symbol','close','high','low','volume','jun_53','life_7','deviation','deviation_count','colse_2',
+    'code_day','code_day1','judie_149','strength_persists','zhangdi_50_1','open_4','volume_4','colse_88',
+    "demon_stock_recovery","demon_stock_repair","full_bottoming","strength_emerges"]
+    tdf = tdf[use_c]
+    r_c = {c: f"{c}_pre" for c in use_c if c != "symbol"}
+    tdf.rename(columns=r_c, inplace=True)
+    this_minbar = pd.merge(this_minbar, tdf, on="symbol", how="left")
+    _t0 = time.perf_counter()
+    this_minbar = minbar_date(this_minbar,tdf)
+    _t1 = time.perf_counter()
+    logger.info(f"[耗时] calc_today__yzgdqdf ) {_t1 - _t0:>8.2f} 秒")
+    return this_minbar  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
