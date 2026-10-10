@@ -1,0 +1,300 @@
+# ZBHJ3C1:EMA(CLOSE,1);
+# ZBHJ3C2:EMA(ZBHJ3C1,5);
+# ZBHJ3_1:EMA(HHV(ZBHJ3C2,5),1);
+# ZBHJ4_1:EMA(HHV(ZBHJ3_1,17),1);
+# ZBHJ5_1:EMA(HHV(ZBHJ4_1,17),2);
+# 条件1:=CROSS(ZBHJ4_1,ZBHJ5_1);
+# ZBHJ1:(MA(CLOSE,3)+MA(CLOSE,6)+MA(CLOSE,12)+MA(CLOSE,24))/4;
+# ZBHJ2:MA(ZBHJ1,3);
+# ZBHJ3:=REF(LOW,5)< REF(ZBHJ2,5) OR REF(LOW,4)< REF(ZBHJ2,4) OR REF(LOW,3)< REF(ZBHJ2,3) OR REF(LOW,2)< REF(ZBHJ2,2) OR REF(LOW,1)< REF(ZBHJ2,1);
+# ZBHJ4:=(CLOSE-REF(CLOSE,1))/REF(CLOSE,1)*100;
+# ZBHJ5:=ZBHJ4>9.5 AND NOT(CLOSE=OPEN);
+# ZBHJ6:=SUM(ZBHJ5,5)< 3 AND ZBHJ5 AND CLOSE>ZBHJ2 AND ZBHJ3;
+# ZBHJ7:=REF(CLOSE,BARSLAST(ZBHJ6));
+# ZBHJ8:=ZBHJ5 AND LOW< ZBHJ2 * 1.08;
+# 条件2:=ZBHJ6 AND ZBHJ8 AND DYNAINFO(17)>0;
+# 共振选股: 条件1 AND 条件2;
+
+
+from loguru import logger
+import time
+import numpy as np
+import pandas as pd
+
+def tdx_ema(sr: pd.Series, n):
+    return sr.ewm(alpha=2 / (n + 1), adjust=False).mean()
+
+def tdx_ema1(sr: pd.Series, sr1: pd.Series,n):
+    alpha=2 / (n + 1)
+    return sr*alpha + sr1*(1-alpha)
+
+def hhv(sr:pd.Series,n):
+    return sr.rolling(n).max()
+
+def llv(sr:pd.Series,n):
+    return sr.rolling(n).min()
+
+def tdx_ma(series: pd.Series, n: int):
+    return series.rolling(n).mean()
+
+def sum_1(series: pd.Series, n: int):
+    return series.rolling(n).sum()
+
+
+def daily_date(pre_daybar):
+    pre_daybar = pre_daybar[['symbol','date','high','low','close','open','preClose']].copy()
+    pre_daybar = pre_daybar.sort_values(['symbol','date']).reset_index(drop = True)
+    
+    pre_daybar['zbhj3c2'] = pre_daybar.groupby('symbol')['close'].transform(tdx_ema,n=5)
+    pre_daybar['zbhj3_1'] = pre_daybar.groupby('symbol')['zbhj3c2'].transform(lambda s: tdx_ema(hhv(s,5),1))
+    pre_daybar['zbhj4_1'] = pre_daybar.groupby('symbol')['zbhj3_1'].transform(lambda s: tdx_ema(hhv(s,17),1))
+    pre_daybar['zbhj5_1'] = pre_daybar.groupby('symbol')['zbhj4_1'].transform(lambda s: tdx_ema(hhv(s,17),2))
+    pre_daybar['tiaojian1'] = np.where((pre_daybar['zbhj4_1']>pre_daybar['zbhj5_1']) & (pre_daybar.groupby('symbol')['zbhj4_1'].shift(1)<=pre_daybar.groupby('symbol')['zbhj5_1'].shift(1)),1,0)
+
+    pre_daybar['zhj2_sum3'] =   pre_daybar.groupby('symbol')['close'].transform(lambda s: s.rolling(3).sum()/3)
+    pre_daybar['zhj2_sum6'] =   pre_daybar.groupby('symbol')['close'].transform(lambda s: s.rolling(6).sum()/6)
+    pre_daybar['zhj2_sum12'] =   pre_daybar.groupby('symbol')['close'].transform(lambda s: s.rolling(12).sum()/12)
+    pre_daybar['zhj2_sum24'] =   pre_daybar.groupby('symbol')['close'].transform(lambda s: s.rolling(24).sum()/24)
+    pre_daybar['zbhj1'] = (pre_daybar['zhj2_sum3'] + pre_daybar['zhj2_sum6'] + pre_daybar['zhj2_sum12'] + pre_daybar['zhj2_sum24']) / 4
+    
+    pre_daybar['zbhj2'] = pre_daybar.groupby('symbol')['zbhj1'].transform(tdx_ma,n=3)
+
+    pre_daybar['zbhj3'] = np.where((pre_daybar.groupby('symbol')['low'].shift(5) < pre_daybar.groupby('symbol')['zbhj2'].shift(5))|(pre_daybar.groupby('symbol')['low'].shift(4) < pre_daybar.groupby('symbol')['zbhj2'].shift(4))|(pre_daybar['low'].shift(3) < pre_daybar.groupby('symbol')['zbhj2'].shift(3))|(pre_daybar.groupby('symbol')['low'].shift(2) < pre_daybar.groupby('symbol')['zbhj2'].shift(2))|(pre_daybar.groupby('symbol')['low'].shift(1) < pre_daybar.groupby('symbol')['zbhj2'].shift(1)),1,0)
+    
+    pre_daybar['zbhj4'] = (pre_daybar['close']-pre_daybar['preClose'])/pre_daybar['preClose']*100
+    pre_daybar['zbhj5'] = np.where((pre_daybar['zbhj4'] > 9.5) & (pre_daybar['close'] != pre_daybar['open']),1,0)
+
+    pre_daybar['zbhj6_0'] = pre_daybar.groupby('symbol')['zbhj5'].transform(sum_1,n = 5)
+    pre_daybar['zbhj6'] = np.where(( pre_daybar['zbhj6_0'] < 3) & (pre_daybar['zbhj5'] == 1) & (pre_daybar['close'] > pre_daybar['zbhj2']) & (pre_daybar['zbhj3'] == 1),1,0)
+
+    pre_daybar['zbhj8'] = np.where((pre_daybar['zbhj5'] == 1) & (pre_daybar['low'] < pre_daybar['zbhj2'] * 1.08),1,0)
+    pre_daybar['tiaojian2'] = np.where((pre_daybar['zbhj6'] == 1) & (pre_daybar['zbhj8'] == 1),1,0)
+    pre_daybar['gongzhen'] = np.where((pre_daybar['tiaojian1']==1) & (pre_daybar['tiaojian2']==1),1,0)
+
+
+
+    #分钟线需要的数据
+    pre_daybar['zbhj3_1_1'] = pre_daybar.groupby('symbol')['zbhj3c2'].transform(lambda s: tdx_ema(hhv(s,4),1))
+    pre_daybar['zbhj4_1_1'] = pre_daybar.groupby('symbol')['zbhj3_1'].transform(lambda s: tdx_ema(hhv(s,16),1))
+
+    pre_daybar['zbhj2_sum2'] =   pre_daybar.groupby('symbol')['close'].transform(lambda s: s.rolling(2).sum())
+    pre_daybar['zbhj2_sum5'] =   pre_daybar.groupby('symbol')['close'].transform(lambda s: s.rolling(5).sum())
+    pre_daybar['zbhj2_sum11'] =   pre_daybar.groupby('symbol')['close'].transform(lambda s: s.rolling(11).sum())
+    pre_daybar['zbhj2_sum23'] =   pre_daybar.groupby('symbol')['close'].transform(lambda s: s.rolling(23).sum())
+
+    pre_daybar['zbhj1_sum2'] =   pre_daybar.groupby('symbol')['zbhj1'].transform(lambda s: s.rolling(2).sum())
+
+    pre_daybar['zbhj2_lag5'] = pre_daybar.groupby('symbol')['zbhj2'].shift(4)
+    pre_daybar['zbhj2_lag4'] = pre_daybar.groupby('symbol')['zbhj2'].shift(3)
+    pre_daybar['zbhj2_lag3'] = pre_daybar.groupby('symbol')['zbhj2'].shift(2)
+    pre_daybar['zbhj2_lag2'] = pre_daybar.groupby('symbol')['zbhj2'].shift(1)
+
+    pre_daybar['low_5'] = pre_daybar.groupby('symbol')['low'].shift(4)
+    pre_daybar['low_4'] = pre_daybar.groupby('symbol')['low'].shift(3)
+    pre_daybar['low_3'] = pre_daybar.groupby('symbol')['low'].shift(2)
+    pre_daybar['low_2'] = pre_daybar.groupby('symbol')['low'].shift(1)
+
+    pre_daybar['low1'] = pre_daybar['low']
+    pre_daybar['zbhj6_0_1'] = pre_daybar.groupby('symbol')['zbhj5'].transform(sum_1,n = 4)
+
+    return pre_daybar
+
+def minbar_date(this_minbar, pre_daybar):
+
+    this_minbar["day_low"] = this_minbar.groupby(["symbol"])["low"].cummin()
+    this_minbar['zbhj3c2'] = this_minbar['close']*(2/6) + this_minbar['zbhj3c2_pre']*(1-2/6)
+    this_minbar['zbhj3_1'] = np.maximum(this_minbar['zbhj3c2'],this_minbar['zbhj3_1_1_pre'])
+    this_minbar['zbhj4_1'] = np.maximum(this_minbar['zbhj3_1'],this_minbar['zbhj4_1_1_pre'])
+    this_minbar['zbhj5_1'] = this_minbar['zbhj4_1']*(2/3) + this_minbar['zbhj5_1_pre']*(1-2/3)
+    this_minbar['tiaojian1'] = np.where((this_minbar['zbhj4_1']>this_minbar['zbhj5_1']) & (this_minbar['zbhj4_1_pre']<=this_minbar['zbhj5_1_pre']),1,0)
+
+    this_minbar['zbhj2_0'] = (this_minbar['close'] + this_minbar['zbhj2_sum2_pre']) /3
+    this_minbar['zbhj2_1'] = (this_minbar['close'] + this_minbar['zbhj2_sum5_pre'] )/6
+    this_minbar['zbhj2_2'] = (this_minbar['close'] + this_minbar['zbhj2_sum11_pre'] )/12
+    this_minbar['zbhj2_3'] = (this_minbar['close'] + this_minbar['zbhj2_sum23_pre']) /24
+    
+    this_minbar['zbhj1'] = (this_minbar['zbhj2_0'] + this_minbar['zbhj2_1'] + this_minbar['zbhj2_2'] + this_minbar['zbhj2_3']) / 4
+    
+    this_minbar['zbhj2'] = (this_minbar['zbhj1'] + this_minbar['zbhj1_sum2_pre']) / 3
+
+    this_minbar['zbhj3'] = np.where((this_minbar['low_5_pre'] < this_minbar['zbhj2_lag5_pre']) | (this_minbar['low_4_pre'] < this_minbar['zbhj2_lag4_pre']) | (this_minbar['low_3_pre'] < this_minbar['zbhj2_lag3_pre']) | (this_minbar['low_2_pre'] < this_minbar['zbhj2_lag2_pre']) | (this_minbar['low'] < this_minbar['low1_pre']),1,0)
+    this_minbar['zbhj4'] = (this_minbar['close']-this_minbar['close_pre'])/this_minbar['close_pre']*100
+    this_minbar['zbhj5'] = np.where((this_minbar['zbhj4'] > 9.5) & (this_minbar['close'] != this_minbar['open_day']),1,0)
+    
+    this_minbar['zbhj6_0'] = this_minbar['zbhj5'] + this_minbar['zbhj6_0_1_pre']
+    this_minbar['zbhj6'] = np.where(( this_minbar['zbhj6_0'] < 3) & (this_minbar['zbhj5'] == 1) & (this_minbar['close'] > this_minbar['zbhj2']) & (this_minbar['zbhj3']) == 1,1,0)
+    this_minbar['zbhj8'] = np.where((this_minbar['zbhj5'] == 1) & (this_minbar['day_low'] < this_minbar['zbhj2'] * 1.08),1,0)
+    this_minbar['tiaojian2'] = np.where((this_minbar['zbhj6'] == 1) & (this_minbar['zbhj8'] == 1),1,0)
+    this_minbar['gongzhen'] = np.where((this_minbar['tiaojian1']==1) & (this_minbar['tiaojian2']==1),1,0)
+    
+    # drop_c = [
+    #     'zbhj3c2','zbhj3_1','zbhj4_1','zbhj5_1','tiaojian1','zbhj2','zbhj2_1','zbhj2_2','zbhj2_3','zbhj1','zbhj3','zbhj4','zbhj5','zbhj6_0','zbhj6','zbhj8','tiaojian2']
+    # this_minbar.drop(columns=[c for c in drop_c if c in this_minbar.columns], inplace=True)
+
+    return this_minbar
+
+
+def calc__yzgdqdf(this_minbar, pre_daybar):
+
+    pre_daybar = daily_date(pre_daybar)
+    tdf = pre_daybar.sort_values(['symbol', 'date',], ascending=True).drop_duplicates(['symbol'], keep='last')
+    use_c = ['symbol','close','low1','zbhj3c2','zbhj3_1_1','zbhj4_1_1','zbhj1_sum2','zbhj2_sum2','zbhj2_sum5','zbhj2_sum11','zbhj2_sum23','zbhj2_lag5','zbhj2_lag4','zbhj2_lag3','zbhj2_lag2','low_5','low_4','low_3','low_2','zbhj6_0_1','zbhj5_1','zbhj4_1']
+    tdf = tdf[use_c]
+    r_c = {c: f"{c}_pre" for c in use_c if c != "symbol"}
+    tdf.rename(columns=r_c, inplace=True)
+    this_minbar = pd.merge(this_minbar, tdf, on="symbol", how="left")
+    _t0 = time.perf_counter()
+    this_minbar = minbar_date(this_minbar,tdf)
+    _t1 = time.perf_counter()
+    logger.info(f"[耗时] calc_today__yzgdqdf ) {_t1 - _t0:>8.2f} 秒")
+    return this_minbar  
+
+
+
+
+
+
+
+
+# --- this_minbar ---
+# symbol                           object  non_null=630047  eg='000001.SZ'
+# time                             object  non_null=630047  eg='09:31:00'
+# date                             int64  non_null=630047  eg=np.int64(20260908)
+# unixtime                         int64  non_null=630047  eg=np.int64(1788831060000)
+# open                             float64  non_null=630047  eg=np.float64(11.66)
+# high                             float64  non_null=630047  eg=np.float64(11.73)
+# low                              float64  non_null=630047  eg=np.float64(11.65)
+# close                            float64  non_null=630047  eg=np.float64(11.719999999999999)
+# volume                           float64  non_null=630047  eg=np.float64(31764.0)
+# amount                           float64  non_null=630047  eg=np.float64(37105110.0)
+# mdata_time                       object  non_null=630047  eg='2026-09-08 09:31:01'
+# bidMostAmountL1                  float64  non_null=629821  eg=np.float64(22543519.0)  [L1: l1transaction1m rename 带后缀]
+# offMostAmountL1                  float64  non_null=629821  eg=np.float64(11136583.0)  [L1: l1transaction1m rename 带后缀]
+# bidTotalAmountL1                 float64  non_null=629821  eg=np.float64(24543614.0)  [L1: l1transaction1m rename 带后缀]
+# offTotalAmountL1                 float64  non_null=629821  eg=np.float64(12561496.0)  [L1: l1transaction1m rename 带后缀]
+# bidMostAmountL2                  float64  non_null=350171  eg=np.float64(0.0)  [L2: l2transaction1m rename 带后缀]
+# bidBigAmountL2                   float64  non_null=350171  eg=np.float64(8375812.0)  [L2: l2transaction1m rename 带后缀]
+# bidMediumAmountL2                float64  non_null=350171  eg=np.float64(9134199.0)  [L2: l2transaction1m rename 带后缀]
+# bidSmallAmountL2                 float64  non_null=350171  eg=np.float64(4702753.0)  [L2: l2transaction1m rename 带后缀]
+# unactiveBidMostAmountL2          float64  non_null=350171  eg=np.float64(0.0)  [L2: l2transaction1m rename 带后缀]
+# unactiveBidBigAmountL2           float64  non_null=350171  eg=np.float64(2019478.0)  [L2: l2transaction1m rename 带后缀]
+# unactiveBidMediumAmountL2        float64  non_null=350171  eg=np.float64(6819102.0)  [L2: l2transaction1m rename 带后缀]
+# unactiveBidSmallAmountL2         float64  non_null=350171  eg=np.float64(5121107.0)  [L2: l2transaction1m rename 带后缀]
+# offMostAmountL2                  float64  non_null=350171  eg=np.float64(0.0)  [L2: l2transaction1m rename 带后缀]
+# offBigAmountL2                   float64  non_null=350171  eg=np.float64(4322924.6)  [L2: l2transaction1m rename 带后缀]
+# offMediumAmountL2                float64  non_null=350171  eg=np.float64(6923536.0)  [L2: l2transaction1m rename 带后缀]
+# offSmallAmountL2                 float64  non_null=350171  eg=np.float64(2713226.4)  [L2: l2transaction1m rename 带后缀]
+# unactiveOffMostAmountL2          float64  non_null=350171  eg=np.float64(3748376.0)  [L2: l2transaction1m rename 带后缀]
+# unactiveOffBigAmountL2           float64  non_null=350171  eg=np.float64(7442888.4)  [L2: l2transaction1m rename 带后缀]
+# unactiveOffMediumAmountL2        float64  non_null=350171  eg=np.float64(7799228.6)  [L2: l2transaction1m rename 带后缀]
+# unactiveOffSmallAmountL2         float64  non_null=350171  eg=np.float64(3222271.0)  [L2: l2transaction1m rename 带后缀]
+# netInflowMostAmountL2            float64  non_null=350171  eg=np.float64(-3748376.0)  [L2: l2transaction1m rename 带后缀]
+# netInflowBigAmountL2             float64  non_null=350171  eg=np.float64(-1370523.0)  [L2: l2transaction1m rename 带后缀]
+# netInflowMediumAmountL2          float64  non_null=350171  eg=np.float64(1230536.4000000004)  [L2: l2transaction1m rename 带后缀]
+# netInflowSmallAmountL2           float64  non_null=350171  eg=np.float64(3888362.5999999996)  [L2: l2transaction1m rename 带后缀]
+# index_close                      float64  non_null=630047  eg=np.float64(13751.836199999998)
+# name                             object  non_null=630047  eg='平安银行'
+# open_day                         float64  non_null=630047  eg=np.float64(11.66)
+# high_day                         float64  non_null=630047  eg=np.float64(11.79)
+# low_day                          float64  non_null=630047  eg=np.float64(11.65)
+# close_day                        float64  non_null=630047  eg=np.float64(11.729999999999999)
+# preClose                         float64  non_null=630047  eg=np.float64(11.7)
+# circulating_capital              float64  non_null=630047  eg=np.float64(19405684991.0)
+# signal_pct                       float64  non_null=630047  eg=np.float64(0.17)
+# open_pct                         float64  non_null=630047  eg=np.float64(-0.34)
+# close_pct                        float64  non_null=630047  eg=np.float64(0.26)
+# net_pnl                          float64  non_null=630047  eg=np.float64(0.6)
+# signal_pnl                       float64  non_null=630047  eg=np.float64(0.09)
+# data_idx                         int64  non_null=630047  eg=np.int64(0)
+
+# --- pre_daybar ---
+# symbol                           object  non_null=2090131  eg='000001.SZ'
+# name                             object  non_null=2090131  eg='平安银行'
+# unixtime                         int64  non_null=2090131  eg=np.int64(1736092800000)
+# date                             int64  non_null=2090131  eg=np.int64(20250106)
+# time                             object  non_null=2090131  eg='00:00:00'
+# open                             float64  non_null=2090131  eg=np.float64(11.38)
+# high                             float64  non_null=2090131  eg=np.float64(11.48)
+# low                              float64  non_null=2090131  eg=np.float64(11.22)
+# close                            float64  non_null=2090131  eg=np.float64(11.440000000000001)
+# preClose                         float64  non_null=2090131  eg=np.float64(11.38)
+# volume                           float64  non_null=2090131  eg=np.float64(1085536.0)
+# amount                           float64  non_null=2090131  eg=np.float64(1234305778.0)
+# circulating_capital              float64  non_null=2089896  eg=np.float64(19405617528.0)
+# bidMostAmountL1                  float64  non_null=2081206  eg=np.float64(290310628.0)  [L1: l1transaction1m rename 带后缀]
+# offMostAmountL1                  float64  non_null=2081206  eg=np.float64(328077278.0)  [L1: l1transaction1m rename 带后缀]
+# bidTotalAmountL1                 float64  non_null=2081206  eg=np.float64(608520073.0)  [L1: l1transaction1m rename 带后缀]
+# offTotalAmountL1                 float64  non_null=2081206  eg=np.float64(625785701.0)  [L1: l1transaction1m rename 带后缀]
+# bidMostAmountL2                  float64  non_null=874428  eg=np.float64(81210936.0)  [L2: l2transaction1m rename 带后缀]
+# bidBigAmountL2                   float64  non_null=874428  eg=np.float64(56424074.0)  [L2: l2transaction1m rename 带后缀]
+# bidMediumAmountL2                float64  non_null=874428  eg=np.float64(98615497.0)  [L2: l2transaction1m rename 带后缀]
+# bidSmallAmountL2                 float64  non_null=874428  eg=np.float64(88123642.0)  [L2: l2transaction1m rename 带后缀]
+# unactiveBidMostAmountL2          float64  non_null=874428  eg=np.float64(69451251.0)  [L2: l2transaction1m rename 带后缀]
+# unactiveBidBigAmountL2           float64  non_null=874428  eg=np.float64(63908511.0)  [L2: l2transaction1m rename 带后缀]
+# unactiveBidMediumAmountL2        float64  non_null=874428  eg=np.float64(95995608.0)  [L2: l2transaction1m rename 带后缀]
+# unactiveBidSmallAmountL2         float64  non_null=874428  eg=np.float64(80043103.0)  [L2: l2transaction1m rename 带后缀]
+# offMostAmountL2                  float64  non_null=874428  eg=np.float64(41393066.0)  [L2: l2transaction1m rename 带后缀]
+# offBigAmountL2                   float64  non_null=874428  eg=np.float64(52340525.0)  [L2: l2transaction1m rename 带后缀]
+# offMediumAmountL2                float64  non_null=874428  eg=np.float64(104334355.0)  [L2: l2transaction1m rename 带后缀]
+# offSmallAmountL2                 float64  non_null=874428  eg=np.float64(111330528.0)  [L2: l2transaction1m rename 带后缀]
+# unactiveOffMostAmountL2          float64  non_null=874428  eg=np.float64(51299977.0)  [L2: l2transaction1m rename 带后缀]
+# unactiveOffBigAmountL2           float64  non_null=874428  eg=np.float64(67278955.0)  [L2: l2transaction1m rename 带后缀]
+# unactiveOffMediumAmountL2        float64  non_null=874428  eg=np.float64(116170104.0)  [L2: l2transaction1m rename 带后缀]
+# unactiveOffSmallAmountL2         float64  non_null=874428  eg=np.float64(89625113.0)  [L2: l2transaction1m rename 带后缀]
+# netInflowMostAmountL2            float64  non_null=874428  eg=np.float64(57969144.0)  [L2: l2transaction1m rename 带后缀]
+# netInflowBigAmountL2             float64  non_null=874428  eg=np.float64(713105.0)  [L2: l2transaction1m rename 带后缀]
+# netInflowMediumAmountL2          float64  non_null=874428  eg=np.float64(-25893354.0)  [L2: l2transaction1m rename 带后缀]
+# netInflowSmallAmountL2           float64  non_null=874428  eg=np.float64(-32788896.0)  [L2: l2transaction1m rename 带后缀]
+# index_close                      float64  non_null=2090131  eg=np.float64(9885.655)
+# turnover_rate                    float64  non_null=2089896  eg=np.float64(0.0055939265959132735)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
