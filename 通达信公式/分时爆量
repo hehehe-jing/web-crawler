@@ -1,0 +1,120 @@
+# 总买单:SUM(IF(C>REF(C,1),V/1000,0),0),COLORRED;
+# 总卖单:SUM(IF(C<REF(C,1),V/1000,0),0);
+
+# {总买单大于总卖单 涨幅百分比 栏目显示}
+# 差值百分比:IF(总卖单>0,ROUND((总买单-总卖单)/总卖单*10000)/100,0),NODRAW,COLORMAGENTA;
+
+# 买入量:="VOL.MAVOL1#DAY"/100,NODRAW,COLORFFFFFF;
+# 追入量:=买入量*2,NODRAW,COLORFFFFFF;
+
+# 涨停量:=买入量*5,NODRAW,COLORFFFFFF;
+
+# A14:=V>买入量 AND V<追入量 AND C>DYNAINFO(3)*1.014 AND C<DYNAINFO(3)*1.043 AND 总买单>总卖单 ;
+# DRAWICON(A14,总买单,7);
+# A15:=V>追入量 AND V<涨停量 AND C>DYNAINFO(3)*1.043 AND C<DYNAINFO(3)*1.071 AND 总买单>总卖单;
+# DRAWICON(A15,总买单,1);
+
+# DRAWICON(V>涨停量 AND 总买单>总卖单,总买单,3);
+
+
+# A16:=REF(HHV(C,0),1);
+# A17:=REF(HHV(V,0),1);
+# A18:=A16/DYNAINFO(3)<1.05;
+# A19:=CROSS(C,A16) AND V>A17 AND A18 AND C>DYNAINFO(3)*1.014 AND C<DYNAINFO(3)*1.043;
+# A20:=CROSS(C,A16) AND V>A17 AND A18 AND C>DYNAINFO(3)*1.043 AND C<DYNAINFO(3)*1.071;
+# DRAWICON(A19 OR A20,总买单,5);
+# DRAWTEXT(A19 OR A20,总买单,'爆量买点'),COLORYELLOW;
+
+from loguru import logger
+import time
+import numpy as np
+import pandas as pd
+
+def tdx_ema(sr: pd.Series, n):
+    return sr.ewm(alpha=2 / (n + 1), adjust=False).mean()
+
+def tdx_ema1(sr: pd.Series, sr1: pd.Series,n):
+    alpha=2 / (n + 1)
+    return sr*alpha + sr1*(1-alpha)
+
+def tdx_sma2(series, n, m):
+    alpha = m / n
+    return series.ewm(alpha=alpha, adjust=False).mean()
+
+def hhv(sr:pd.Series,n):
+    return sr.rolling(n,min_periods=1).max()
+
+def llv(sr:pd.Series,n):
+    return sr.rolling(n,min_periods=1).min()
+
+def tdx_ma(series: pd.Series, n: int):
+    return series.rolling(n).mean()
+
+def sum_1(series: pd.Series, n: int):
+    return series.rolling(n).sum()
+
+# 将有信号的标为1，无信号的标为0，而且在本次信号出现后，n天内不再出现信号
+def filter_tdx(cond, n):
+    cond_values = cond.values
+    res = np.zeros(len(cond_values), dtype=int)
+    last = -999
+    for i in range(len(cond_values)):
+        if cond_values[i] == 1 and i - last > n:
+            res[i] = 1
+            last = i
+    return pd.Series(res, index=cond.index)
+
+def calc_code_day(ser):
+    groups = (ser == 1).cumsum()          # 每遇到一次信号，组号 +1
+    return ser.groupby(groups).cumcount() # 组内从 0 开始编号
+
+def ref_bottom_high(pre_daybar, extra=0):
+    high_lag = pre_daybar.groupby('symbol')['high'].shift(extra)
+    bottom_high  = high_lag.where(pre_daybar['initial_bottoming'] == 1)
+    return bottom_high.groupby(pre_daybar['symbol']).ffill()
+
+def llv_since_bottom(pre_daybar):
+    seg = pre_daybar.groupby('symbol')['initial_bottoming'].cumsum()
+    return pre_daybar.groupby(['symbol', seg])['low'].cummin()
+
+def daily_date(pre_daybar):
+    pre_daybar = pre_daybar[['symbol','date','high','low','close','open','preClose','volume','amount','circulating_capital','name']].copy()
+    pre_daybar = pre_daybar.sort_values(['symbol','date']).reset_index(drop = True)
+    pre_daybar['volume_mean5'] = pre_daybar.groupby('symbol')['volume'].transform(lambda x:x.rolling(4).sum())
+
+
+    return pre_daybar
+
+def minbar_date(this_minbar,pre_daybar):
+    this_minbar['time_copy'] = (pd.to_datetime(this_minbar['time']) - pd.Timedelta(minutes=1)).dt.time
+    this_minbar['close'] = this_minbar['close'].round(2)
+    this_minbar['close_shift'] = this_minbar.groupby('symbol')['close'].shift(1)
+    this_minbar['zong_buy_1'] = np.where(this_minbar['close'] > this_minbar['close_shift'],this_minbar['volume']/1000,0)
+    this_minbar['zong_sell_1'] = np.where(this_minbar['close'] < this_minbar['close_shift'],this_minbar['volume']/1000,0)
+    
+    this_minbar['zong_buy'] = this_minbar.groupby('symbol')['zong_buy_1'].cumsum()
+    this_minbar['zong_sell'] = this_minbar.groupby('symbol')['zong_sell_1'].cumsum()
+
+    this_minbar['volume_1'] = this_minbar.groupby('symbol')['volume'].cumsum()
+    this_minbar['volume_zhangting_1'] = (this_minbar['volume_mean5_pre']+this_minbar['volume_1'])/5
+
+    this_minbar['volume_zhangting'] = this_minbar['volume_zhangting_1'] / 100 * 5
+    this_minbar['xinhao'] = np.where((this_minbar['volume'] > this_minbar['volume_zhangting']) & (this_minbar['zong_buy'] > this_minbar['zong_sell']),1,0)
+
+    return this_minbar
+
+
+def calc__yzgdqdf(this_minbar, pre_daybar):
+
+    pre_daybar = daily_date(pre_daybar)
+    tdf = pre_daybar.sort_values(['symbol', 'date',], ascending=True).drop_duplicates(['symbol'], keep='last')
+    use_c = ['symbol','close','volume_mean5']
+    tdf = tdf[use_c]
+    r_c = {c: f"{c}_pre" for c in use_c if c != "symbol"}
+    tdf.rename(columns=r_c, inplace=True)
+    this_minbar = pd.merge(this_minbar, tdf, on="symbol", how="left")
+    _t0 = time.perf_counter()
+    this_minbar = minbar_date(this_minbar,tdf)
+    _t1 = time.perf_counter()
+    logger.info(f"[耗时] calc_today__yzgdqdf ) {_t1 - _t0:>8.2f} 秒")
+    return this_minbar  
