@@ -1,0 +1,213 @@
+
+# {主散资金}
+# A:=V*50/CAPITAL;
+# 主力A:MA(A,4),COLORRED,LINETHICK3;
+# 游资A:=MA(A,8),COLORYELLOW,LINETHICK3;
+# 大户A:=MA(A,16),COLORMAGENTA,LINETHICK3;
+# 散户A:=MA(A,32),COLORGREEN,LINETHICK2;
+# STICKLINE(主力A>0,0,主力A,2,0),COLORRED;
+# STICKLINE(游资A>0,0,游资A,2,0),COLORYELLOW;
+# STICKLINE(大户A>0,0,大户A,2,1),COLORMAGENTA;
+
+
+# {主力与散户}
+# M:=55;
+# N:=21;{有用34的}
+# 散户: (HHV(HIGH,M)-CLOSE)/(HHV(HIGH,M)-LLV(LOW,M))-2,COLORFFFF00,LINETHICK2;
+# RSVX:=(CLOSE-LLV(LOW,N))/(HHV(HIGH,N)-LLV(LOW,N))*100;
+# KK:=SMA(RSVX,3,1);
+# DD:=SMA(KK,3,1);
+# JJ:=3*KK-2*DD;
+# 主力:EMA(JJ,6)/100-2,COLORYELLOW,LINETHICK2;
+
+
+# {能量饱和度}
+# {N:=15;}
+#  SAT1:=IF((AMOUNT/C)/(HHV(AMOUNT,N)/HHV(C,N))*4>4,4,(AMOUNT/C)/(HHV(AMOUNT,N)/HHV(C,N))*4);
+#  STICKLINE(((SAT1>=4)AND BARSCOUNT(C)),0,(1.5+SAT1),1,0),COLORRED;
+ 
+# 动能饱和度:SAT1,LINETHICK1,COLORYELLOW,LINETHICK1;
+
+from loguru import logger
+import time
+import numpy as np
+import pandas as pd
+
+def tdx_ema(sr: pd.Series, n):
+    return sr.ewm(alpha=2 / (n + 1), adjust=False).mean()
+
+def tdx_ema1(sr: pd.Series, sr1: pd.Series,n):
+    alpha=2 / (n + 1)
+    return sr*alpha + sr1*(1-alpha)
+
+def tdx_sma2(series, n, m):
+    alpha = m / n
+    return series.ewm(alpha=alpha, adjust=False).mean()
+
+def hhv(sr:pd.Series,n):
+    return sr.rolling(n,min_periods=1).max()
+
+def llv(sr:pd.Series,n):
+    return sr.rolling(n,min_periods=1).min()
+
+def tdx_ma(series: pd.Series, n: int):
+    return series.rolling(n).mean()
+
+def sum_1(series: pd.Series, n: int):
+    return series.rolling(n).sum()
+
+# 将有信号的标为1，无信号的标为0，而且在本次信号出现后，n天内不再出现信号
+def filter_tdx(cond, n):
+    cond_values = cond.values
+    res = np.zeros(len(cond_values), dtype=int)
+    last = -999
+    for i in range(len(cond_values)):
+        if cond_values[i] == 1 and i - last > n:
+            res[i] = 1
+            last = i
+    return pd.Series(res, index=cond.index)
+
+def calc_code_day(ser):
+    groups = (ser == 1).cumsum()          # 每遇到一次信号，组号 +1
+    return ser.groupby(groups).cumcount() # 组内从 0 开始编号
+
+def ref_bottom_high(pre_daybar, extra=0):
+    high_lag = pre_daybar.groupby('symbol')['high'].shift(extra)
+    bottom_high  = high_lag.where(pre_daybar['initial_bottoming'] == 1)
+    return bottom_high.groupby(pre_daybar['symbol']).ffill()
+
+def llv_since_bottom(pre_daybar):
+    seg = pre_daybar.groupby('symbol')['initial_bottoming'].cumsum()
+    return pre_daybar.groupby(['symbol', seg])['low'].cummin()
+
+def daily_date(pre_daybar):
+    pre_daybar = pre_daybar[['symbol','date','high','low','close','open','preClose','volume','amount','circulating_capital']].copy()
+    pre_daybar = pre_daybar.sort_values(['symbol','date']).reset_index(drop = True)
+    pre_daybar['date_str'] = pd.to_datetime(pre_daybar['date'].astype(str))
+    pre_daybar['list_days_max'] = pre_daybar.groupby(['symbol'])['date_str'].transform('max')
+    pre_daybar['list_days_min'] = pre_daybar.groupby(['symbol'])['date_str'].transform('min')
+    pre_daybar['list_days'] = (pre_daybar['list_days_max'] - pre_daybar['list_days_min']).dt.days +1
+
+    pre_daybar['a'] = pre_daybar['volume']*50/pre_daybar['circulating_capital']*100
+    pre_daybar['zhuli_a'] = pre_daybar.groupby('symbol')['a'].transform(lambda x : x.rolling(4).mean())
+    pre_daybar['youzi_a'] = pre_daybar.groupby('symbol')['a'].transform(lambda x : x.rolling(8).mean())
+    pre_daybar['dahu_a'] = pre_daybar.groupby('symbol')['a'].transform(lambda x : x.rolling(16).mean())
+
+    m = 55
+    m1 = 21
+    pre_daybar['max_n_amount'] = pre_daybar.groupby('symbol')['amount'].transform(lambda x : hhv(x,m1))
+    pre_daybar['max_n_close'] = pre_daybar.groupby('symbol')['close'].transform(lambda x : hhv(x,m1))
+    pre_daybar['sat1'] = np.where((pre_daybar['amount']/pre_daybar['close'])/(pre_daybar['max_n_amount']/pre_daybar['max_n_close'])*4>4,5.5,(pre_daybar['amount']/pre_daybar['close'])/(pre_daybar['max_n_amount']/pre_daybar['max_n_close'])*4)
+
+    pre_daybar['xinhao1'] = np.where(
+        (pre_daybar['list_days']>15) & 
+    (pre_daybar['sat1'] > pre_daybar['youzi_a'])
+    & (pre_daybar['sat1'] >= 4)
+    & (pre_daybar['sat1'] > pre_daybar['dahu_a'])
+    & (pre_daybar['zhuli_a'] > pre_daybar['youzi_a'])
+    & (pre_daybar['zhuli_a'] > pre_daybar['dahu_a']),
+    1, 0
+)
+    pre_daybar['xinhao2'] = np.where(
+    (pre_daybar['list_days']<4)
+    & (pre_daybar['sat1']>=4)
+    ,
+    1, 0
+)
+    pre_daybar['xinhao3'] = np.where(
+    (pre_daybar['list_days']>=4)
+    & (pre_daybar['list_days']<8)
+    ,
+    1, 0
+)
+
+    pre_daybar['xinhao'] = np.where(pre_daybar['xinhao1']|pre_daybar['xinhao2']|pre_daybar['xinhao3'],1,0)
+
+
+
+
+    # 分钟线所需要的数据
+    pre_daybar['sum_3'] = pre_daybar.groupby('symbol')['a'].transform(lambda x: x.rolling(3).sum())
+    pre_daybar['sum_7'] = pre_daybar.groupby('symbol')['a'].transform(lambda x: x.rolling(7).sum())
+    pre_daybar['sum_15'] = pre_daybar.groupby('symbol')['a'].transform(lambda x: x.rolling(15).sum())
+    pre_daybar['max_n_amount_1'] = pre_daybar.groupby('symbol')['amount'].transform(lambda x : hhv(x,m1-1))
+    pre_daybar['max_n_close_1'] = pre_daybar.groupby('symbol')['close'].transform(lambda x : hhv(x,m1-1))
+
+    
+    return pre_daybar
+
+
+def minbar_date(this_minbar, pre_daybar):
+    m1 = 21
+    this_minbar['low'] = this_minbar.groupby('symbol')['low'].cummin()
+    this_minbar['high'] = this_minbar.groupby('symbol')['high'].cummax()
+    this_minbar['volume'] = this_minbar.groupby('symbol')['volume'].cumsum()
+    this_minbar['amount'] = this_minbar.groupby('symbol')['amount'].cumsum()
+
+    this_minbar['a'] = this_minbar['volume']*50 / this_minbar['circulating_capital'] * 100
+    this_minbar['zhuli_a'] = (this_minbar['a']+this_minbar['sum_3_pre']) / 4
+    this_minbar['youzi_a'] = (this_minbar['a']+this_minbar['sum_7_pre']) / 8
+    this_minbar['dahu_a'] = (this_minbar['a']+this_minbar['sum_15_pre']) / 16
+
+    this_minbar['max_n_amount'] = np.maximum(this_minbar['amount'],this_minbar['max_n_amount_1_pre'])
+    this_minbar['max_n_close'] = np.maximum(this_minbar['close'],this_minbar['max_n_close_1_pre'])
+    this_minbar['sat1'] = np.where((this_minbar['amount']/this_minbar['close'])/(this_minbar['max_n_amount']/this_minbar['max_n_close'])*4>4,5.5,(this_minbar['amount']/this_minbar['close'])/(this_minbar['max_n_amount']/this_minbar['max_n_close'])*4)
+    this_minbar['list_days_thisminbar'] = this_minbar['list_days_pre'] + 1
+
+    this_minbar['xinhao1'] = np.where(
+        (this_minbar['list_days_thisminbar']>15) & 
+        (this_minbar['sat1'] > this_minbar['youzi_a'])
+        & (this_minbar['sat1'] >= 4)
+        & (this_minbar['sat1'] > this_minbar['dahu_a'])
+        & (this_minbar['zhuli_a'] > this_minbar['youzi_a'])
+        & (this_minbar['zhuli_a'] > this_minbar['dahu_a']),
+        1, 0
+    )
+    this_minbar['xinhao2'] = np.where(
+    (this_minbar['list_days_thisminbar']<4)
+    & (this_minbar['sat1']>=4)
+    ,
+    1, 0
+)
+    this_minbar['xinhao3'] = np.where(
+    (this_minbar['list_days_thisminbar']>=4)
+    & (this_minbar['list_days_thisminbar']<8)
+    ,
+    1, 0
+)
+
+
+    this_minbar['xinhao'] = np.where(this_minbar['xinhao1']|this_minbar['xinhao2']|this_minbar['xinhao3'],1,0)
+    return this_minbar
+
+
+def calc__yzgdqdf(this_minbar, pre_daybar):
+
+    pre_daybar = daily_date(pre_daybar)
+    tdf = pre_daybar.sort_values(['symbol', 'date',], ascending=True).drop_duplicates(['symbol'], keep='last')
+    use_c = ['symbol','close','high','low','volume','sum_3','sum_7','sum_15','max_n_amount_1','max_n_close_1','list_days']
+    tdf = tdf[use_c]
+    r_c = {c: f"{c}_pre" for c in use_c if c != "symbol"}
+    tdf.rename(columns=r_c, inplace=True)
+    this_minbar = pd.merge(this_minbar, tdf, on="symbol", how="left")
+    _t0 = time.perf_counter()
+    this_minbar = minbar_date(this_minbar,tdf)
+    _t1 = time.perf_counter()
+    logger.info(f"[耗时] calc_today__yzgdqdf ) {_t1 - _t0:>8.2f} 秒")
+    return this_minbar  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
