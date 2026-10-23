@@ -1,0 +1,129 @@
+# Z111:=STRCAT(HYBLOCK,'----');    
+# Z311:=STRCAT(Z111,DYBLOCK);    
+# Z411:=STRCAT(Z311,'----');    
+# DRAWTEXT_FIX(ISLASTBAR,0.36,1,0,STRCAT(Z411,GNBLOCK)),COLORCYAN;
+
+# 主营增长率:FINANCE(44),COLORBROWN,NODRAW;
+# DRAWTEXT_FIX(CURRBARSCOUNT=1,0.9,1,1,STRCAT('主营增长率: ',CON2STR(主营增长率,2))),COLORYELLOW;
+
+# 净利润增长率:=FINANCE(43),COLORMAGENTA,NODRAW; 
+# DRAWTEXT_FIX(CURRBARSCOUNT=1,0.992,1,1,STRCAT('净利增长率: ',CON2STR(净利润增长率,2))),COLORYELLOW;
+
+
+
+
+# HW:=CONST(FINDHIGHBARS(H,1,FROMOPEN-1,1)),COLORGREEN,DOTLINE;  
+# LW:=CONST(FINDLOWBARS(L,1,FROMOPEN-1,1));
+# 竞价额:= DYNAINFO(15);
+
+
+# 换手Z:= 竞价额/O/FINANCE(46)*100;
+# QG:HHV(H,480),DOTLINE,COLORRED;
+
+
+# 现价:=C,COLORWHITE;
+
+# TT:BARSCOUNT(C);
+# TP:REF(C,1)<=REF(HHV(H,480),2) AND C>REF(HHV(H,480),1);
+# 突破: TP AND TT>1 AND TT<240;
+
+# QQQ1:REF(C,1);
+# {CROSS(C,REF(HHV(H,480),1))}
+# QQQ:REF(HHV(H,480),2);
+# QQC:C;
+# QQG:REF(HHV(H,480),1);
+
+# 量比:V/REF(MA(V,5),1);
+# AAA1:V;
+# AAA:HHV(V,240);
+# HI:H;
+# SHOU:C;
+# KAI:O;
+# DI:LOW;
+
+
+# DRAWICON(突破 AND V>=HHV(V,240) AND 量比>1,C,42);
+
+# BL:=竞价额/REF(HHV(AMOUNT,5),1)*100;
+
+# JJ3:=SUM(IF(BETWEEN(TIME,0930,0930),V,0),FROMOPEN);
+
+# DRAWTEXT(JJ3/BLYY.ZD5#DAY*100>=2 AND BETWEEN(TIME,0930,0930) AND 换手Z>=1,C,'爆'),COLORMAGENTA;
+
+from loguru import logger
+import time
+import numpy as np
+import pandas as pd
+
+def tdx_ema(sr: pd.Series, n):
+    return sr.ewm(alpha=2 / (n + 1), adjust=False).mean()
+
+def tdx_ema1(sr: pd.Series, sr1: pd.Series,n):
+    alpha=2 / (n + 1)
+    return sr*alpha + sr1*(1-alpha)
+
+def tdx_sma2(series, n, m):
+    alpha = m / n
+    return series.ewm(alpha=alpha, adjust=False).mean()
+
+def hhv(sr:pd.Series,n):
+    return sr.rolling(n,min_periods=1).max()
+
+def llv(sr:pd.Series,n):
+    return sr.rolling(n,min_periods=1).min()
+
+def tdx_ma(series: pd.Series, n: int):
+    return series.rolling(n).mean()
+
+def sum_1(series: pd.Series, n: int):
+    return series.rolling(n).sum()
+
+# 将有信号的标为1，无信号的标为0，而且在本次信号出现后，n天内不再出现信号
+def filter_tdx(cond, n):
+    cond_values = cond.values
+    res = np.zeros(len(cond_values), dtype=int)
+    last = -999
+    for i in range(len(cond_values)):
+        if cond_values[i] == 1 and i - last > n:
+            res[i] = 1
+            last = i
+    return pd.Series(res, index=cond.index)
+
+def calc_code_day(ser):
+    groups = (ser == 1).cumsum()          # 每遇到一次信号，组号 +1
+    return ser.groupby(groups).cumcount() # 组内从 0 开始编号
+
+def ref_bottom_high(pre_daybar, extra=0):
+    high_lag = pre_daybar.groupby('symbol')['high'].shift(extra)
+    bottom_high  = high_lag.where(pre_daybar['initial_bottoming'] == 1)
+    return bottom_high.groupby(pre_daybar['symbol']).ffill()
+
+def llv_since_bottom(pre_daybar):
+    seg = pre_daybar.groupby('symbol')['initial_bottoming'].cumsum()
+    return pre_daybar.groupby(['symbol', seg])['low'].cummin()
+
+
+def minbar_date(this_minbar):
+    this_minbar['time_copy'] = (pd.to_datetime(this_minbar['time']) - pd.Timedelta(minutes=1)).dt.time
+    # this_minbar['high'] = this_minbar.groupby('symbol')['high'].cummax()
+    this_minbar['tt'] = this_minbar.groupby('symbol')['time'].cumcount()
+    this_minbar['high'] = this_minbar.groupby('symbol')['close'].cummax()
+    this_minbar['tp'] = np.where((this_minbar.groupby('symbol')['close'].shift(1) <= this_minbar.groupby('symbol')['high'].shift(2))
+     & (this_minbar['close'] > this_minbar.groupby('symbol')['high'].shift(1)),1,0)
+
+    this_minbar['tupo'] = np.where((this_minbar['tp'])&(this_minbar['tt'] > 1)&(this_minbar['tt'] < 240),1,0)
+    this_minbar['u_ma'] = this_minbar.groupby('symbol')['volume'].transform(lambda x: x.rolling(5).mean())
+    this_minbar['liangbi'] = this_minbar['volume'] / this_minbar.groupby('symbol')['u_ma'].shift(1)
+    this_minbar['volume_1'] = this_minbar.groupby('symbol')['volume'].cummax()
+    this_minbar['xinhao'] = np.where((this_minbar['tupo'])&(this_minbar['volume'] >= this_minbar['volume_1'])&(this_minbar['liangbi'] > 1),1,0)
+
+
+    return this_minbar
+
+
+def calc__yzgdqdf(this_minbar):
+    _t0 = time.perf_counter()
+    this_minbar = minbar_date(this_minbar)
+    _t1 = time.perf_counter()
+    logger.info(f"[耗时] calc_today__yzgdqdf ) {_t1 - _t0:>8.2f} 秒")
+    return this_minbar  
