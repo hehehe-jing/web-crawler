@@ -1,0 +1,346 @@
+# 量价:=(VOL/CLOSE)/3,NODRAW;
+
+# 统计主动大买量:=SUM(IF(量价>100 AND CLOSE>REF(CLOSE,1),量价,0),0);
+
+# 统计主动大卖量:=SUM(IF(量价>100 AND CLOSE<REF(CLOSE,1),量价,0),0);
+
+# 小买:=SUM(IF(量价<100 AND CLOSE>REF(CLOSE,1),量价,0),0);
+
+# 小卖:=SUM(IF(量价<100 AND CLOSE<REF(CLOSE,1),量价,0),0);
+
+# 合力度:=统计主动大买量+统计主动大卖量+小买+小卖;
+
+# 主动大买量比:=(统计主动大买量/合力度)*100;
+
+# 主动大卖量比:=(统计主动大卖量/合力度)*100;
+
+# 涨停能量:= 主动大买量比-主动大卖量比;
+
+# SSA:=IF(C>REF(C,1),AMOUNT,0);
+
+# SSB:=IF(C<REF(C,1),AMOUNT,0);
+
+# 攻击资金:=SUM(SSA,0)-SUM(SSB,0),COLORFFFFFF;
+
+# 总额:=SUM(AMOUNT,0);
+
+# 流入占比:(攻击资金)/总额*100,NODRAW COLORFF00FF;
+
+# 涨停能量▇ :主动大买量比-主动大卖量比 ,NODRAW,COLORRED;
+
+# DRAWNUMBER_FIX(涨停能量 AND ISLASTBAR,0.04,0,0,涨停能量),LINETHICK8,COLORRED;
+
+# A1:=SUM(IF(CLOSE>REF(CLOSE,1),VOL/CAPITAL*100,IF(CLOSE<REF(CLOSE,1),-VOL/CAPITAL*100,0)),0);
+
+# 成交额:=V*C/100,NODRAW;
+
+# A2:=SUM((IF(((成交额/8>20) AND (CLOSE>(REF(CLOSE,1)))),成交额,0)),0);
+
+# A3:=SUM((IF(((成交额/8>20) AND (CLOSE<(REF(CLOSE,1)))),成交额,0)),0);
+
+# A4:=SUM((IF(((成交额/8<20) AND (CLOSE>(REF(CLOSE,1)))),成交额,0)),0);
+
+# A5:=SUM((IF(((成交额/8<20) AND (CLOSE<(REF(CLOSE,1)))),成交额,0)),0);
+
+# A6:=((A2+A3)+A4)+A5;
+
+# A7:=IF((ISLASTBAR),((100*A2)/A6),0);
+
+# A8:=IF((ISLASTBAR),((100*A3)/A6),0);
+
+# A9:=IF((ISLASTBAR),((100*A4)/A6),0);
+
+# A10:=IF((ISLASTBAR),((100*A5)/A6),0);
+
+# 机构买:(A2),LINETHICK6,COLORRED;
+
+# 机构卖:(A3),LINETHICK6,COLORBLUE;
+
+# 机构进出:机构买-机构卖,NODRAW;
+
+# 散户买:(A4),COLORLIMAGENTA;
+
+# 散户卖:(A5),COLORFF9900;
+
+# 散户进出:散户买-散户卖,NODRAW;
+
+# 强势:((100*A2)/A6>50);
+
+# STICKLINE(强势,机构买*1.02,机构买*1.1,1,0),COLORYELLOW;
+
+# 拉升:=((100*A2)/A6-(100*A3)/A6)>18 AND (100*A2)/A6-(100*A5)/A6>18;
+
+# STICKLINE(拉升,机构买*1.1,机构买*1.2,1,0),COLORRED;
+
+# DRAWTEXT(ISLASTBAR=1,机构买*0.95,''),LINETHICK2,COLORRED;
+
+# DRAWTEXT(ISLASTBAR=1,机构卖*0.95,''),LINETHICK2,COLORFFFF55;
+
+# Q:=BETWEEN(C/(SUM(AMOUNT,BARSCOUNT(C))/SUM(VOL*100,BARSCOUNT(C))),1.05,0.95);
+
+# Q2:=IF(Q=0,MA(C,BARSCOUNT(C)),(SUM(AMOUNT,BARSCOUNT(C))/SUM(VOL*100,BARSCOUNT(C))));
+
+# DD1:=1;
+
+# AAA1:=STRCAT(STRCAT('机构买入',CON2STR((100*A2)/A6,0)),'%');
+
+# AAA2:=STRCAT(STRCAT('机构卖出',CON2STR((100*A3)/A6,0)),'%');
+
+# AAA0:=STRCAT(STRCAT('机构总买入',CON2STR((100*(A2-A3))/A6,0)),'%');
+
+# AAA3:=STRCAT(STRCAT('散户买入',CON2STR((100*A4)/A6,0)),'%');
+
+# AAA4:=STRCAT(STRCAT('散户卖出',CON2STR((100*A5)/A6,0)),'%');
+
+# AAA5:=STRCAT(STRCAT('散户总买入',CON2STR((100*(A4-A5))/A6,0)),'%');
+
+# 抄底:=IF(CROSS(A2,A3),10,0);
+
+# 统计主动买量:=SUM((IF(((量价>0.20) AND (CLOSE>(REF(CLOSE,1)))),量价,0)),0);
+
+# 统计主动卖量:=SUM((IF(((量价>0.20) AND (CLOSE<(REF(CLOSE,1)))),量价,0)),0);
+
+# 涨停量:((统计主动买量)/统计主动卖量)*10,NODRAW,COLORRED;
+
+# CN:=VOL/((HIGH-LOW)*2-ABS(CLOSE-OPEN));
+
+# 涨停量▇:=(统计主动买量/统计主动卖量)*40,LINETHICK2,NODRAW,COLORRED;
+
+# OBV:=(EXPMA(CLOSE,500)-REF(EXPMA(CLOSE,500),1))/REF(EXPMA(CLOSE,500),1)*100, COLORSTICK;
+
+# 主力:=EXPMA( (EXPMA(CLOSE,500)-REF(EXPMA(CLOSE,500),1))/REF(EXPMA(CLOSE,500),1)*100,120)-0.0004,LINETHICK5,COLORMAGENTA;
+
+# 散户:=EXPMA( (EXPMA(CLOSE,500)-REF(EXPMA(CLOSE,500),1))/REF(EXPMA(CLOSE,500),1)*100,200),LINETHICK5,COLORGREEN;
+
+# DRAWTEXT_FIX(1,0.04,0,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.05,0,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.06,0,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.07,0,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.04,0.1,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.05,0.1,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.06,0.1,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.07,0.1,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.04,0.2,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.05,0.2,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.06,0.2,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.07,0.2,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.04,0.3,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.05,0.3,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.06,0.3,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.07,0.3,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.04,0.4,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.05,0.4,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.06,0.4,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.07,0.4,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.04,0.5,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.05,0.5,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.06,0.5,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.07,0.5,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.04,0.6,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.05,0.6,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.06,0.6,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.07,0.6,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.04,0.7,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.05,0.7,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.06,0.7,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.07,0.7,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.04,0.8,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.05,0.8,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.06,0.8,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.07,0.8,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.04,0.9,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.05,0.9,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.06,0.9,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.07,0.9,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.04,1,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.05,1,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.06,1,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(1,0.07,1,0,'▇'),COLORGRAY;
+
+# DRAWTEXT_FIX(涨停能量▇ >80,0.04,0,0,'▇'),COLORFF00FF;
+
+# DRAWTEXT_FIX(涨停能量▇ >80,0.05,0,0,'▇'),COLORFF00FF;
+
+# DRAWTEXT_FIX(涨停能量▇ >80,0.06,0,0,'▇'),COLORFF00FF;
+
+# DRAWTEXT_FIX(涨停能量▇ >80,0.07,0,0,'▇'),COLORFF00FF;
+
+# DRAWTEXT_FIX(涨停能量▇ >80,0.04,0.1,0,'▇'),COLORFF00FF;
+
+# DRAWTEXT_FIX(涨停能量▇ >80,0.05,0.1,0,'▇'),COLORFF00FF;
+
+# DRAWTEXT_FIX(涨停能量▇ >80,0.06,0.1,0,'▇'),COLORFF00FF;
+
+# DRAWTEXT_FIX(涨停能量▇ >80,0.07,0.1,0,'▇'),COLORFF00FF;
+
+# DRAWTEXT_FIX(涨停能量▇ >80,0.04,0.2,0,'▇'),COLORFF00FF;
+
+# DRAWTEXT_FIX(涨停能量▇ >80,0.05,0.2,0,'▇'),COLORFF00FF;
+
+# DRAWTEXT_FIX(涨停能量▇ >80,0.06,0.2,0,'▇'),COLORFF00FF;
+
+# DRAWTEXT_FIX(涨停能量▇ >80,0.07,0.2,0,'▇'),COLORFF00FF;
+
+# DRAWTEXT_FIX(涨停能量▇ >80,0.03,0.2,0,'●'),COLORFF00FF;
+
+# DRAWTEXT_FIX(涨停能量▇ >80,0.03,0.1,0,'●'),COLORFF00FF;
+
+# DRAWTEXT_FIX(涨停能量▇ >80,0.03,0,0,'●'),COLORFF00FF;
+
+# DRAWTEXT_FIX(70<涨停能量▇ <80,0.04,0.3,0,'▇'),COLORYELLOW;
+
+# DRAWTEXT_FIX(70<涨停能量▇ <80,0.05,0.3,0,'▇'),COLORYELLOW;
+
+# DRAWTEXT_FIX(70<涨停能量▇ <80,0.06,0.3,0,'▇'),COLORYELLOW;
+
+# DRAWTEXT_FIX(70<涨停能量▇ <80,0.07,0.3,0,'▇'),COLORYELLOW;
+
+# DRAWTEXT_FIX(70<涨停能量▇ <80,0.04,0.4,0,'▇'),COLORYELLOW;
+
+# DRAWTEXT_FIX(70<涨停能量▇ <80,0.05,0.4,0,'▇'),COLORYELLOW;
+
+# DRAWTEXT_FIX(70<涨停能量▇ <80,0.06,0.4,0,'▇'),COLORYELLOW;
+
+# DRAWTEXT_FIX(70<涨停能量▇ <80,0.07,0.4,0,'▇'),COLORYELLOW;
+
+# DRAWTEXT_FIX(70<涨停能量▇ <80,0.04,0.5,0,'▇'),COLORYELLOW;
+
+# DRAWTEXT_FIX(70<涨停能量▇ <80,0.05,0.5,0,'▇'),COLORYELLOW;
+
+# DRAWTEXT_FIX(70<涨停能量▇ <80,0.06,0.5,0,'▇'),COLORYELLOW;
+
+# DRAWTEXT_FIX(70<涨停能量▇ <80,0.07,0.5,0,'▇'),COLORYELLOW;
+
+# DRAWTEXT_FIX(涨停能量▇ >80,0.08,0,0,' ←买入值75~80以上'),COLORYELLOW;
+
+# DRAWTEXT_FIX(1,0.20,0.82,0,STRCAT(STRCAT('涨停能量：',CON2STR(涨停能量,2)),'（数值达到20以上，关注准备买入，达到30以上能保持10几分钟，今天涨停概率就很大，坚决买。）')),COLOR00FFFF;
+
+# DRAWICON(CROSS((C/Q2),1.03),机构买,5);
+
+# DRAWICON(CROSS(EXPMA(OBV,120)-0.0004,EXPMA(OBV,200)),机构买,34);
+
+from loguru import logger
+import time
+import numpy as np
+import pandas as pd
+
+def tdx_ema(sr: pd.Series, n):
+    return sr.ewm(alpha=2 / (n + 1), adjust=False).mean()
+
+def tdx_ema1(sr: pd.Series, sr1: pd.Series,n):
+    alpha=2 / (n + 1)
+    return sr*alpha + sr1*(1-alpha)
+
+def tdx_sma2(series, n, m):
+    alpha = m / n
+    return series.ewm(alpha=alpha, adjust=False).mean()
+
+def hhv(sr:pd.Series,n):
+    return sr.rolling(n,min_periods=1).max()
+
+def llv(sr:pd.Series,n):
+    return sr.rolling(n,min_periods=1).min()
+
+def tdx_ma(series: pd.Series, n: int):
+    return series.rolling(n).mean()
+
+def sum_1(series: pd.Series, n: int):
+    return series.rolling(n).sum()
+
+# 将有信号的标为1，无信号的标为0，而且在本次信号出现后，n天内不再出现信号
+def filter_tdx(cond, n):
+    cond_values = cond.values
+    res = np.zeros(len(cond_values), dtype=int)
+    last = -999
+    for i in range(len(cond_values)):
+        if cond_values[i] == 1 and i - last > n:
+            res[i] = 1
+            last = i
+    return pd.Series(res, index=cond.index)
+
+def calc_code_day(ser):
+    groups = (ser == 1).cumsum()          # 每遇到一次信号，组号 +1
+    return ser.groupby(groups).cumcount() # 组内从 0 开始编号
+
+def ref_bottom_high(pre_daybar, extra=0):
+    high_lag = pre_daybar.groupby('symbol')['high'].shift(extra)
+    bottom_high  = high_lag.where(pre_daybar['initial_bottoming'] == 1)
+    return bottom_high.groupby(pre_daybar['symbol']).ffill()
+
+def llv_since_bottom(pre_daybar):
+    seg = pre_daybar.groupby('symbol')['initial_bottoming'].cumsum()
+    return pre_daybar.groupby(['symbol', seg])['low'].cummin()
+
+def minbar_date(this_minbar):
+    this_minbar['close'] = this_minbar['close'].round(2)
+    this_minbar = this_minbar.sort_values(['symbol', 'time']).reset_index(drop=True)
+    this_minbar['time_copy'] = (pd.to_datetime(this_minbar['time']) - pd.Timedelta(minutes=1)).dt.time
+    this_minbar['chengjiaoe'] = this_minbar['volume'] * this_minbar['close'] /100
+    this_minbar['shift'] = this_minbar.groupby('symbol')['close'].shift(1)
+    this_minbar['a2_1'] = np.where((this_minbar['chengjiaoe'] / 8 > 20) & (this_minbar['close'] > this_minbar['shift']),this_minbar['chengjiaoe'],0)
+    this_minbar['a3_1'] = np.where((this_minbar['chengjiaoe'] / 8 > 20) & (this_minbar['close'] < this_minbar['shift']),this_minbar['chengjiaoe'],0)
+    this_minbar['a4_1'] = np.where((this_minbar['chengjiaoe'] / 8 < 20) & (this_minbar['close'] > this_minbar['shift']),this_minbar['chengjiaoe'],0)
+    this_minbar['a5_1'] = np.where((this_minbar['chengjiaoe'] / 8 < 20) & (this_minbar['close'] < this_minbar['shift']),this_minbar['chengjiaoe'],0)
+    this_minbar['is'] = np.where(this_minbar['close'] == this_minbar['shift'],1,0)
+    
+    this_minbar['a2'] = this_minbar.groupby('symbol')['a2_1'].cumsum()
+    this_minbar['a3'] = this_minbar.groupby('symbol')['a3_1'].cumsum()
+    this_minbar['a4'] = this_minbar.groupby('symbol')['a4_1'].cumsum()
+    this_minbar['a5'] = this_minbar.groupby('symbol')['a5_1'].cumsum()
+    this_minbar['a6'] = ((this_minbar['a2']+this_minbar['a3'])+this_minbar['a4'])+this_minbar['a5']
+
+    this_minbar['lasheng'] = np.where((((100*this_minbar['a2'])/this_minbar['a6']-(100*this_minbar['a3'])/this_minbar['a6']) > 18) & (((100*this_minbar['a2'])/this_minbar['a6']-(100*this_minbar['a5'])/this_minbar['a6']) > 18),1,0)
+    this_minbar['qiangshi'] = np.where((100*this_minbar['a2'])/this_minbar['a6'] > 50,1,0)
+    this_minbar['xinhao'] = np.where((this_minbar['lasheng']) & (this_minbar['qiangshi']),1,0)
+    
+    return this_minbar
+
+def calc__yzgdqdf(this_minbar):
+    _t0 = time.perf_counter()
+    this_minbar = minbar_date(this_minbar)
+    _t1 = time.perf_counter()
+    logger.info(f"[耗时] calc_today__yzgdqdf ) {_t1 - _t0:>8.2f} 秒")
+    return this_minbar  
